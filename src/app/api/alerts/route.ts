@@ -1,7 +1,8 @@
 import { connection, type NextRequest } from "next/server";
 
 import { getDb } from "@/db";
-import { handleRouteError, ok } from "@/lib/http";
+import { getSessionFarmer } from "@/lib/auth";
+import { fail, handleRouteError, ok } from "@/lib/http";
 import { listAlerts } from "@/lib/queries";
 
 /**
@@ -15,6 +16,11 @@ export async function GET(request: NextRequest) {
   await connection();
 
   try {
+    const farmer = await getSessionFarmer();
+    if (!farmer) {
+      return fail("Sign in to view nearby alerts.", 401, { code: "AUTH_REQUIRED" });
+    }
+
     const params = request.nextUrl.searchParams;
     const latParam = params.get("lat");
     const lngParam = params.get("lng");

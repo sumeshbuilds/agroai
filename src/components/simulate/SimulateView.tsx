@@ -90,7 +90,7 @@ export function SimulateView() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-6">
       <SectionHeading
         title="Predator & hazard alerts"
         subtitle="Simulate a wildlife sighting or thermal event and see which farms fall inside the 3 km danger radius."

@@ -8,8 +8,20 @@ export type GeoPoint = [number, number];
 
 export type Language = "en" | "hi" | "or";
 
+export interface FarmerDTO {
+  id: number;
+  name: string;
+  language: Language | string;
+  createdAt: string | null;
+  /** True when the farmer has at least one saved farm. */
+  hasFarm?: boolean;
+  /** True when the farmer has at least one active crop. */
+  hasCrop?: boolean;
+}
+
 export interface FarmDTO {
   id: number;
+  farmerId: number | null;
   name: string;
   points: GeoPoint[];
   centroidLat: number;
@@ -25,6 +37,8 @@ export interface CropDTO {
   cropName: string;
   sowingDate: string;
   growthStage: string | null;
+  /** Expected duration from sowing to harvest, in days. */
+  durationDays: number | null;
   isActive: boolean | null;
   ageDays: number;
   createdAt: string | null;

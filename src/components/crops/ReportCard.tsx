@@ -2,17 +2,32 @@ import { Sparkles } from "lucide-react";
 
 import { Callout } from "@/components/ui/Callout";
 import { MarkdownLite } from "@/components/ui/MarkdownLite";
+import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import type { WeeklyReportDTO } from "@/lib/types";
 
-export function ReportCard({ report }: { report: WeeklyReportDTO }) {
+export function ReportCard({
+  report,
+  embedded = false,
+}: {
+  report: WeeklyReportDTO;
+  /** Drops the outer card chrome when the report sits inside another panel. */
+  embedded?: boolean;
+}) {
   return (
-    <article className="card space-y-3 p-4 sm:p-5">
+    <article
+      className={cn(
+        "space-y-3",
+        embedded ? "" : "card p-4 sm:p-5",
+      )}
+    >
       <header className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex items-start gap-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-            <Sparkles className="h-5 w-5" />
-          </span>
+          {embedded ? null : (
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+              <Sparkles className="h-5 w-5" />
+            </span>
+          )}
           <div>
             <h3 className="text-base font-bold">
               {report.cropName

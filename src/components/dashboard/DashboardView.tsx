@@ -1,11 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ReactNode } from "react";
+import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
   Map as MapIcon,
+  MapPin,
   RefreshCw,
   Siren,
   Sparkles,
@@ -13,32 +14,40 @@ import {
 } from "lucide-react";
 
 import { AlertBanner, type ActiveAlert } from "@/components/alerts/AlertBanner";
+import { useSessionFarmer } from "@/components/auth/session";
+import { CropDayGuide } from "@/components/dashboard/CropDayGuide";
+import { PestSirenCard } from "@/components/dashboard/PestSirenCard";
 import { ReportCard } from "@/components/crops/ReportCard";
 import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
-import { SectionHeading } from "@/components/ui/SectionHeading";
 import { WeatherCard } from "@/components/weather/WeatherCard";
 import { ApiError, api } from "@/lib/api-client";
-import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useFarms } from "@/lib/hooks/use-farms";
 import { DANGER_RADIUS_KM, animalKind } from "@/lib/map";
-import { formatRelative } from "@/lib/format";
-import type { AlertDTO, WeeklyReportDTO } from "@/lib/types";
+import { formatAcres, formatRelative } from "@/lib/format";
+import type { AlertDTO, CropDTO, WeeklyReportDTO } from "@/lib/types";
 import type { WeatherSnapshot, WeatherWarning } from "@/lib/weather";
 
-function todayLabel(): string {
-  return new Date().toLocaleDateString(undefined, {
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-  });
-}
+// Leaflet must never render on the server (ARCHITECTURE.md rule #1).
+const FarmMap = nextDynamic(
+  () => import("@/components/map/FarmMap").then((mod) => mod.FarmMap),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="card h-full min-h-[420px] animate-pulse-soft rounded-2xl" />
+    ),
+  },
+);
 
 export function DashboardView() {
+  const farmer = useSessionFarmer();
   const { farms, loading: farmsLoading, needsSetup, refresh } = useFarms();
   const [farmId, setFarmId] = useState<number | null>(null);
+
+  const [crops, setCrops] = useState<CropDTO[]>([]);
+  const [cropsLoading, setCropsLoading] = useState(true);
 
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [warnings, setWarnings] = useState<WeatherWarning[]>([]);
@@ -51,10 +60,32 @@ export function DashboardView() {
   const [notice, setNotice] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState<Set<number>>(new Set());
 
-  // Client-only value: renders empty during SSR/prerender.
-  const headerLabel = useClientValue(todayLabel, "");
+  const selectedFarm = useMemo(
+    () => farms.find((farm) => farm.id === farmId) ?? farms[0] ?? null,
+    [farms, farmId],
+  );
 
-  const selectedFarm = farms.find((farm) => farm.id === farmId) ?? farms[0] ?? null;
+  const activeCrop = useMemo(
+    () => crops.find((crop) => crop.isActive) ?? crops[0] ?? null,
+    [crops],
+  );
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const { crops: list } = await api.listCrops();
+        if (active) setCrops(list);
+      } catch {
+        // The dashboard still works without the crop guide.
+      } finally {
+        if (active) setCropsLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const loadReports = useCallback(async () => {
     try {
@@ -78,7 +109,8 @@ export function DashboardView() {
 
   useEffect(() => {
     if (!selectedFarm) return;
-    const activeFarmId = selectedFarm.id;
+    const activeFarm = selectedFarm;
+    const watch = { lat: activeFarm.centroidLat, lng: activeFarm.centroidLng };
 
     let cancelled = false;
 
@@ -86,10 +118,10 @@ export function DashboardView() {
       setWeatherLoading(true);
       try {
         const [weatherRes, alertsRes] = await Promise.all([
-          api.getWeatherByFarm(activeFarmId),
+          api.getWeatherByFarm(activeFarm.id),
           api.listAlerts({
-            lat: selectedFarm.centroidLat,
-            lng: selectedFarm.centroidLng,
+            lat: watch.lat,
+            lng: watch.lng,
             radiusKm: DANGER_RADIUS_KM,
             limit: 5,
           }),
@@ -113,8 +145,13 @@ export function DashboardView() {
 
     void load();
 
+    // Re-fetch every 10 minutes so the map markers and "Now" tiles track
+    // Open-Meteo's 15-minute nowcast cadence without a manual reload.
+    const refreshTimer = window.setInterval(load, 10 * 60 * 1000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(refreshTimer);
     };
   }, [selectedFarm]);
 
@@ -156,174 +193,232 @@ export function DashboardView() {
     }
   };
 
+  const hasFarms = farms.length > 0;
+  const totalAcres = farms.reduce((sum, farm) => sum + (farm.areaAcres ?? 0), 0);
+  const liveAt = weather?.fetchedAt
+    ? new Date(weather.fetchedAt).toLocaleTimeString(undefined, {
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+
   return (
-    <div className="space-y-5">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <p className="muted text-sm font-medium">{headerLabel || "Welcome"}</p>
-          <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl">
-            Namaste 🙏
+    <div className="w-full px-4 pb-4 pt-4 sm:px-6 sm:pt-4">
+      <header className="flex flex-wrap items-end justify-between gap-4 pb-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
+            {farmer ? `Welcome, ${farmer.name}` : "Farm dashboard"}
           </h1>
+          <p className="muted mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
+            {hasFarms ? (
+              <>
+                <span className="inline-flex items-center gap-1.5 font-medium text-[var(--foreground)]">
+                  <MapPin className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
+                  {selectedFarm?.name}
+                </span>
+                <span aria-hidden className="opacity-40">
+                  ·
+                </span>
+                <span>
+                  {farms.length} {farms.length === 1 ? "field" : "fields"} ·{" "}
+                  {formatAcres(totalAcres)}
+                </span>
+                {liveAt ? (
+                  <>
+                    <span aria-hidden className="opacity-40">
+                      ·
+                    </span>
+                    <span className="tabular-nums">Updated {liveAt}</span>
+                  </>
+                ) : null}
+              </>
+            ) : (
+              "Map your first field to unlock live weather and weekly advice."
+            )}
+          </p>
         </div>
 
-        {farms.length > 1 ? (
-          <label className="text-sm">
-            <span className="muted text-xs font-semibold">Active farm</span>
-            <select
-              className="select mt-1"
-              value={selectedFarm?.id ?? ""}
-              onChange={(event) => setFarmId(Number(event.target.value))}
-            >
-              {farms.map((farm) => (
-                <option key={farm.id} value={farm.id}>
-                  {farm.name}
-                </option>
-              ))}
-            </select>
-          </label>
+        {hasFarms ? (
+          <div className="flex flex-wrap items-center gap-2">
+            {alerts.length > 0 ? (
+              <span className="chip chip-danger">
+                <Siren className="h-3.5 w-3.5" />
+                {alerts.length} nearby
+              </span>
+            ) : null}
+            <Link href="/map" className="btn btn-secondary">
+              <MapIcon className="h-4 w-4" />
+              Manage fields
+            </Link>
+          </div>
         ) : null}
       </header>
 
-      <SetupNotice showDatabase={needsSetup} />
+      {needsSetup || notice || activeAlert ? (
+        <div className="space-y-3 pb-4">
+          {needsSetup ? <SetupNotice showDatabase /> : null}
 
-      {notice ? <Callout tone="info">{notice}</Callout> : null}
+          {notice ? <Callout tone="info">{notice}</Callout> : null}
 
-      {activeAlert ? (
-        <AlertBanner
-          alert={activeAlert}
-          onDismiss={() => {
-            if (alerts[0]) {
-              setDismissed((current) => new Set(current).add(alerts[0].id));
-            }
-          }}
-        />
-      ) : null}
-
-      {farmsLoading ? (
-        <WeatherCard weather={null} warnings={[]} loading />
-      ) : farms.length === 0 ? (
-        <EmptyState
-          icon={<MapIcon className="h-7 w-7" />}
-          title="Map your farmland first"
-          description="Draw your field boundary on the satellite map. We use its centre for hyper-local weather and to warn you when wildlife is nearby."
-          action={
-            <Link href="/map" className="btn btn-primary">
-              <MapIcon className="h-4 w-4" />
-              Open farm map
-              <ArrowRight className="h-4 w-4" />
-            </Link>
-          }
-        />
-      ) : (
-        <WeatherCard
-          weather={weather}
-          warnings={warnings}
-          farmName={selectedFarm?.name}
-          loading={weatherLoading}
-        />
-      )}
-
-      {selectedFarm ? (
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <QuickTile href="/map" icon={<MapIcon className="h-5 w-5" />} label="Farm map" />
-          <QuickTile href="/crops" icon={<Sprout className="h-5 w-5" />} label="My crops" />
-          <QuickTile href="/simulate" icon={<Siren className="h-5 w-5" />} label="Intrusion sim" />
-          <QualityTile area={selectedFarm.areaAcres} />
+          {activeAlert ? (
+            <AlertBanner
+              key={`${activeAlert.animalType}-${activeAlert.createdAt ?? ""}`}
+              alert={activeAlert}
+              onDismiss={() => {
+                if (alerts[0]) {
+                  setDismissed((current) => new Set(current).add(alerts[0].id));
+                }
+              }}
+            />
+          ) : null}
         </div>
       ) : null}
 
-      <section className="space-y-3">
-        <SectionHeading
-          title="This week's advisory"
-          subtitle="AI guidance built from your crop age and the 7-day forecast"
-          icon={<Sparkles className="h-5 w-5" />}
-          action={
-            <Button
-              variant="secondary"
-              onClick={handleGenerate}
-              loading={generating}
-              disabled={farms.length === 0}
-            >
-              <RefreshCw className="h-4 w-4" />
-              Generate now
-            </Button>
-          }
-        />
-
-        {reportsLoading ? (
-          <div className="card h-40 animate-pulse-soft" />
-        ) : reports.length > 0 ? (
-          reports.map((report) => (
-            <ReportCard key={report.id} report={report} />
-          ))
-        ) : (
+      {farmsLoading && !hasFarms ? (
+        <section
+          aria-hidden
+          className="grid gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]"
+        >
+          <div className="h-[60vh] min-h-[400px] animate-pulse-soft rounded-2xl bg-black/5 dark:bg-white/5 lg:sticky lg:top-20 lg:h-[calc(100dvh-6rem)]" />
+          <div className="space-y-4">
+            <div className="card h-[420px] animate-pulse-soft" />
+            <div className="card h-56 animate-pulse-soft" />
+          </div>
+        </section>
+      ) : !hasFarms ? (
+        <div className="pb-4">
           <EmptyState
-            icon={<Sparkles className="h-7 w-7" />}
-            title="No advisory yet"
-            description="Add a crop with its sowing date, then generate this week's action plan."
+            className="mx-auto max-w-2xl"
+            icon={<MapIcon className="h-7 w-7" />}
+            title="Map your farmland first"
+            description="Draw your field boundary on the satellite map. We use its centre for hyper-local weather and to warn you when wildlife is nearby."
             action={
-              <Link href="/crops" className="btn btn-primary">
-                <Sprout className="h-4 w-4" />
-                Add a crop
+              <Link href="/map" className="btn btn-primary">
+                <MapIcon className="h-4 w-4" />
+                Open farm map
+                <ArrowRight className="h-4 w-4" />
               </Link>
             }
           />
-        )}
-      </section>
-
-      <footer className="pb-4 pt-2">
-        <button
-          type="button"
-          onClick={() => void refresh()}
-          className="muted inline-flex items-center gap-1.5 text-xs font-semibold hover:text-[var(--foreground)]"
+        </div>
+      ) : (
+        <section
+          aria-label="Farm overview"
+          className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]"
         >
-          <RefreshCw className="h-3.5 w-3.5" />
-          Refresh farms
-        </button>
-        {reports[0] ? (
-          <span className="muted ml-3 text-xs">
-            Last advisory {formatRelative(reports[0].createdAt)}
-          </span>
-        ) : null}
-      </footer>
-    </div>
-  );
-}
+          {/* Left panel — satellite view */}
+          <div className="relative h-[60vh] min-h-[400px] lg:sticky lg:top-20 lg:h-[calc(100dvh-6rem)]">
+            <FarmMap
+              farms={farms}
+              selectedFarm={selectedFarm}
+              sightings={alerts}
+              onSelectFarm={setFarmId}
+              onRefresh={() => void refresh()}
+              refreshing={farmsLoading}
+            />
+          </div>
 
-function QuickTile({
-  href,
-  icon,
-  label,
-}: {
-  href: string;
-  icon: ReactNode;
-  label: string;
-}) {
-  return (
-    <Link
-      href={href}
-      className="card flex items-center gap-3 p-3.5 transition-colors hover:border-brand-500"
-    >
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-        {icon}
-      </span>
-      <span className="text-sm font-bold">{label}</span>
-    </Link>
-  );
-}
+          {/* Right column — weather, then the farm guide */}
+          <div className="flex flex-col gap-4">
+            <WeatherCard
+              weather={weather}
+              warnings={warnings}
+              farmName={selectedFarm?.name}
+              loading={weatherLoading}
+            />
 
-function QualityTile({ area }: { area: number | null }) {
-  return (
-    <div className="card flex items-center gap-3 p-3.5">
-      <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-soil-100 text-soil-700 dark:bg-soil-700/30 dark:text-soil-300">
-        <MapIcon className="h-5 w-5" />
-      </span>
-      <div>
-        <p className="muted text-[11px] font-semibold uppercase">Mapped area</p>
-        <p className="text-sm font-bold">
-          {area === null || area === undefined ? "—" : `${area.toFixed(2)} acres`}
-        </p>
-      </div>
+            <PestSirenCard
+              key={activeCrop?.id ?? "no-crop"}
+              cropId={activeCrop?.id ?? null}
+              farmName={selectedFarm?.name}
+            />
+
+            {cropsLoading ? (
+              <div className="card h-48 animate-pulse-soft" />
+            ) : activeCrop ? (
+              <CropDayGuide crop={activeCrop} />
+            ) : (
+              <section className="card p-4 sm:p-5">
+                <h2 className="text-base font-semibold">Crop day guide</h2>
+                <p className="muted mt-1 text-sm">
+                  Add a crop with its sowing date to see the day-by-day guide.
+                </p>
+                <Link href="/crops" className="btn btn-secondary mt-3">
+                  <Sprout className="h-4 w-4" />
+                  Add a crop
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </section>
+            )}
+
+            <section className="card flex flex-1 flex-col gap-4 p-4 sm:p-5">
+              <header className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+                    <Sparkles className="h-[1.15rem] w-[1.15rem]" />
+                  </span>
+                  <div>
+                    <h2 className="text-base font-semibold leading-tight">
+                      Guide for our farm
+                    </h2>
+                    <p className="muted mt-0.5 text-xs">
+                      AI advice built from your crop age and the 7-day forecast
+                    </p>
+                  </div>
+                </div>
+                <Button
+                  variant="secondary"
+                  onClick={handleGenerate}
+                  loading={generating}
+                >
+                  <RefreshCw className="h-4 w-4" />
+                  Generate now
+                </Button>
+              </header>
+
+              <div className="flex flex-1 flex-col gap-3">
+                {reportsLoading ? (
+                  <div className="card-muted h-32 animate-pulse-soft rounded-xl" />
+                ) : reports.length > 0 ? (
+                  <div className="flex flex-1 flex-col gap-5 border-t border-[var(--border)] pt-4">
+                    {reports.map((report) => (
+                      <ReportCard key={report.id} report={report} embedded />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="flex flex-1 flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card-muted)]/60 px-5 py-8 text-center">
+                    <Sparkles className="h-6 w-6 text-brand-600 dark:text-brand-400" />
+                    <p className="text-sm font-semibold">No advisory yet</p>
+                    <p className="muted max-w-xs text-xs leading-relaxed">
+                      Add a crop with its sowing date, then generate this
+                      week&apos;s action plan.
+                    </p>
+                    <Link href="/crops" className="btn btn-primary mt-1">
+                      <Sprout className="h-4 w-4" />
+                      Add a crop
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                )}
+              </div>
+
+              {reports[0] ? (
+                <p className="muted text-xs">
+                  Latest advisory generated {formatRelative(reports[0].createdAt)}
+                </p>
+              ) : null}
+
+              <Link
+                href="/simulate"
+                className="muted inline-flex items-center gap-1.5 text-xs font-semibold transition-colors hover:text-[var(--foreground)]"
+              >
+                <Siren className="h-3.5 w-3.5" />
+                Simulate a wildlife intrusion nearby
+              </Link>
+            </section>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

@@ -3,9 +3,11 @@ import type {
   AlertDTO,
   CropDTO,
   FarmDTO,
+  FarmerDTO,
   GeoPoint,
   WeeklyReportDTO,
 } from "./types";
+import type { PestRiskAssessment } from "./pest-risk";
 import type { WeatherSnapshot, WeatherWarning } from "./weather";
 
 export class ApiError extends Error {
@@ -62,8 +64,46 @@ export interface ReportGenerationResponse {
   message?: string;
 }
 
+export interface PestRiskResponse {
+  crop: CropDTO;
+  farmName: string;
+  assessment: PestRiskAssessment;
+}
+
+export interface RegisterInput {
+  name: string;
+  pin: string;
+  farmId: number;
+  cropName: string;
+  cropDays: number;
+  durationDays?: number;
+}
+
 export const api = {
+  me: () => request<{ farmer: FarmerDTO | null }>("/api/auth/me"),
+
+  login: (input: { name: string; pin: string }) =>
+    request<{ farmer: FarmerDTO }>("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  register: (input: RegisterInput) =>
+    request<{ farmer: FarmerDTO; farm: FarmDTO; crop: CropDTO }>(
+      "/api/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+
+  logout: () =>
+    request<{ signedOut: boolean }>("/api/auth/logout", { method: "POST" }),
+
   listFarms: () => request<{ farms: FarmDTO[] }>("/api/farms"),
+
+  listAvailableFarms: () =>
+    request<{ farms: FarmDTO[] }>("/api/farms/available"),
 
   createFarm: (input: { name: string; points: GeoPoint[] }) =>
     request<{ farm: FarmDTO }>("/api/farms", {
@@ -84,11 +124,17 @@ export const api = {
     sowingDate: string;
     farmlandId?: number | null;
     growthStage?: string;
+    durationDays?: number;
   }) =>
     request<{ crop: CropDTO }>("/api/crops", {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  getPestRisk: (cropId?: number) =>
+    request<PestRiskResponse>(
+      `/api/pest-risk${cropId !== undefined ? `?cropId=${cropId}` : ""}`,
+    ),
 
   listAlerts: (options?: {
     lat?: number;

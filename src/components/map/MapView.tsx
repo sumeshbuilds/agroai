@@ -35,7 +35,7 @@ export function MapView() {
   }, []);
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-6">
       <SectionHeading
         title="Farm map"
         subtitle="Draw your farmland on live satellite imagery. Tap to add each corner, then save."

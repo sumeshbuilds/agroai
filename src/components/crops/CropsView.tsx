@@ -11,27 +11,11 @@ import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { ApiError, api } from "@/lib/api-client";
+import { CROP_OPTIONS, defaultDurationDays } from "@/lib/crop-guide";
 import { todayIso } from "@/lib/format";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useFarms } from "@/lib/hooks/use-farms";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
-
-const CROP_OPTIONS = [
-  "Paddy (Rice)",
-  "Wheat",
-  "Maize",
-  "Mustard",
-  "Potato",
-  "Cotton",
-  "Tomato",
-  "Onion",
-  "Sugarcane",
-  "Groundnut",
-  "Soybean",
-  "Millet (Bajra)",
-  "Pulses (Dal)",
-  "Vegetables",
-];
 
 export function CropsView() {
   const { farms, needsSetup } = useFarms();
@@ -46,6 +30,9 @@ export function CropsView() {
   const [cropName, setCropName] = useState(CROP_OPTIONS[0]);
   const [sowingDate, setSowingDate] = useState("");
   const [farmlandId, setFarmlandId] = useState<string>("");
+  const [durationDays, setDurationDays] = useState(
+    String(defaultDurationDays(CROP_OPTIONS[0])),
+  );
   const [saving, setSaving] = useState(false);
 
   // Client-only values, read during render (SSR falls back to "").
@@ -106,6 +93,7 @@ export function CropsView() {
         cropName,
         sowingDate: effectiveSowingDate,
         farmlandId: effectiveFarmlandId ? Number(effectiveFarmlandId) : null,
+        durationDays: Number(durationDays) || undefined,
       });
       setNotice(`Added ${cropName}. You can now generate its weekly advisory.`);
       await refresh();
@@ -143,7 +131,7 @@ export function CropsView() {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-5 sm:px-6">
       <SectionHeading
         title="Crops & weekly advisory"
         subtitle="Tell us what you planted and when. We combine crop age with the local forecast."
@@ -171,13 +159,16 @@ export function CropsView() {
           </Callout>
         ) : null}
 
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <label>
             <span className="muted text-xs font-semibold">Crop</span>
             <select
               className="select mt-1"
               value={cropName}
-              onChange={(event) => setCropName(event.target.value)}
+              onChange={(event) => {
+                setCropName(event.target.value);
+                setDurationDays(String(defaultDurationDays(event.target.value)));
+              }}
             >
               {CROP_OPTIONS.map((option) => (
                 <option key={option} value={option}>
@@ -195,6 +186,19 @@ export function CropsView() {
               value={effectiveSowingDate}
               max={today || undefined}
               onChange={(event) => setSowingDate(event.target.value)}
+            />
+          </label>
+
+          <label>
+            <span className="muted text-xs font-semibold">Crop duration (days)</span>
+            <input
+              type="number"
+              className="input mt-1"
+              min={1}
+              max={400}
+              inputMode="numeric"
+              value={durationDays}
+              onChange={(event) => setDurationDays(event.target.value)}
             />
           </label>
 
@@ -265,7 +269,9 @@ export function CropsView() {
                     <p className="font-bold">{crop.cropName}</p>
                     <p className="muted flex items-center gap-2 text-xs">
                       <CalendarDays className="h-3.5 w-3.5" />
-                      Day {crop.ageDays} · {crop.growthStage ?? "Seedling"}
+                      Day {crop.ageDays}
+                      {crop.durationDays ? ` of ${crop.durationDays}` : ""} ·{" "}
+                      {crop.growthStage ?? "Seedling"}
                       {crop.farmlandName ? ` · ${crop.farmlandName}` : ""}
                     </p>
                   </div>

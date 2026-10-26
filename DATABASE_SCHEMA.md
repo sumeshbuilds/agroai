@@ -11,11 +11,12 @@ Use the following table structures for Neon Serverless Postgres:
 ```typescript
 import { pgTable, serial, integer, text, doublePrecision, timestamp, jsonb, boolean } from 'drizzle-orm/pg-core';
 
-// 1. Farmers / Users Table
+// 1. Farmers / Users Table (name + hashed PIN login)
 export const farmers = pgTable('farmers', {
   id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  phone: text('phone').notNull().unique(),
+  name: text('name').notNull().unique(),
+  phone: text('phone').unique(), // optional
+  pinHash: text('pin_hash').notNull().default(''), // scrypt$salt$hash
   language: text('language').default('en').notNull(), // e.g., 'en', 'hi', 'or'
   pushSubscription: jsonb('push_subscription'), // Web Push JSON object
   createdAt: timestamp('created_at').defaultNow(),
@@ -40,6 +41,7 @@ export const crops = pgTable('crops', {
   cropName: text('crop_name').notNull(), // e.g., "Paddy (Rice)", "Maize", "Tomato"
   sowingDate: timestamp('sowing_date').notNull(),
   growthStage: text('growth_stage').default('Seedling'),
+  durationDays: integer('duration_days'), // expected sowing → harvest duration
   isActive: boolean('is_active').default(true),
   createdAt: timestamp('created_at').defaultNow(),
 });

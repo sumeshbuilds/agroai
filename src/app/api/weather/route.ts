@@ -1,6 +1,7 @@
 import { connection, type NextRequest } from "next/server";
 
 import { getDb } from "@/db";
+import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import { getFarmland } from "@/lib/queries";
 import { buildWeatherWarnings, fetchWeather, WeatherFetchError } from "@/lib/weather";
@@ -14,6 +15,11 @@ export async function GET(request: NextRequest) {
   await connection();
 
   try {
+    const farmer = await getSessionFarmer();
+    if (!farmer) {
+      return fail("Sign in to view weather.", 401, { code: "AUTH_REQUIRED" });
+    }
+
     const params = request.nextUrl.searchParams;
     const farmId = params.get("farmId");
 
@@ -23,8 +29,8 @@ export async function GET(request: NextRequest) {
 
     if (farmId) {
       const db = getDb();
-      const farm = await getFarmland(db, Number(farmId));
-      if (!farm) return fail(`Farm ${farmId} was not found.`, 404);
+      const farm = await getFarmland(db, Number(farmId), farmer.id);
+      if (!farm) return fail(`Farm ${farmId} was not found on your account.`, 404);
       latitude = farm.centroidLat;
       longitude = farm.centroidLng;
       farmName = farm.name;

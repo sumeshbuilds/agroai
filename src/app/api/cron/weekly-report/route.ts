@@ -1,6 +1,7 @@
 import { connection, type NextRequest } from "next/server";
 
 import { getDb } from "@/db";
+import { getSessionFarmer } from "@/lib/auth";
 import { generateWeeklyReport, summariseWeather } from "@/lib/gemini";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import {
@@ -26,12 +27,13 @@ import { fetchWeather } from "@/lib/weather";
  */
 export async function POST(request: NextRequest) {
   try {
-    if (!isAuthorized(request)) {
+    const context = await resolveContext(request);
+    if (!context) {
       return fail("Unauthorized.", 401, { code: "UNAUTHORIZED" });
     }
 
     const cropId = await readCropId(request);
-    const result = await generateReports(cropId);
+    const result = await generateReports(cropId, context.farmerId);
     return ok(result, { status: 201 });
   } catch (error) {
     return handleRouteError(error);
@@ -46,21 +48,40 @@ export async function GET(request: NextRequest) {
   await connection();
 
   try {
-    if (!isAuthorized(request)) {
+    const context = await resolveContext(request);
+    if (!context) {
       return fail("Unauthorized.", 401, { code: "UNAUTHORIZED" });
     }
 
     const cropId = await readCropId(request);
-    const result = await generateReports(cropId);
+    const result = await generateReports(cropId, context.farmerId);
     return ok(result);
   } catch (error) {
     return handleRouteError(error);
   }
 }
 
-function isAuthorized(request: NextRequest): boolean {
+interface ReportContext {
+  /** undefined means a cron request covering every farmer. */
+  farmerId?: number;
+}
+
+/**
+ * A request may act either as a signed-in farmer (scoped to their own crops)
+ * or as the scheduler, authenticated with CRON_SECRET.
+ */
+async function resolveContext(request: NextRequest): Promise<ReportContext | null> {
+  const farmer = await getSessionFarmer();
+  if (farmer) return { farmerId: farmer.id };
+
+  if (isCronAuthorized(request)) return { farmerId: undefined };
+
+  return null;
+}
+
+function isCronAuthorized(request: NextRequest): boolean {
   const secret = process.env.CRON_SECRET?.trim();
-  if (!secret) return true;
+  if (!secret) return false;
 
   const header = request.headers.get("authorization");
   const bearer = header?.startsWith("Bearer ") ? header.slice(7).trim() : null;
@@ -90,13 +111,13 @@ async function readCropId(request: NextRequest): Promise<number | undefined> {
   return undefined;
 }
 
-async function generateReports(cropId?: number) {
+async function generateReports(cropId?: number, farmerId?: number) {
   const db = getDb();
 
   const targets: Array<{ cropId: number; cropName: string; growthStage: string; ageDays: number; sowingDate: string; farm: Farmland }> = [];
 
   if (cropId !== undefined) {
-    const row = await getCropWithFarm(db, cropId);
+    const row = await getCropWithFarm(db, cropId, farmerId);
     if (!row) {
       return { generated: [], message: `Crop ${cropId} was not found.` };
     }
@@ -117,7 +138,7 @@ async function generateReports(cropId?: number) {
       farm: row.farm,
     });
   } else {
-    const rows = await listActiveCropsWithFarm(db);
+    const rows = await listActiveCropsWithFarm(db, farmerId);
     for (const row of rows) {
       if (!row.farm) continue;
       const dto = toCropDTO({ ...row.crop, farmlandName: row.farm.name });

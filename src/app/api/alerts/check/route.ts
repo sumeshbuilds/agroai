@@ -1,4 +1,5 @@
 import { getDb } from "@/db";
+import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok, readJson } from "@/lib/http";
 import { createIntrusionAlert, findFarmsWithinRadius } from "@/lib/queries";
 
@@ -19,6 +20,11 @@ interface AlertCheckBody {
  */
 export async function POST(request: Request) {
   try {
+    const farmer = await getSessionFarmer();
+    if (!farmer) {
+      return fail("Sign in to run an alert check.", 401, { code: "AUTH_REQUIRED" });
+    }
+
     const body = await readJson<AlertCheckBody>(request);
     const { animalType, lat, lng } = body;
 
@@ -54,7 +60,13 @@ export async function POST(request: Request) {
       severity: body.severity,
     });
 
-    const affectedFarms = await findFarmsWithinRadius(db, lat, lng, radiusKm);
+    const affectedFarms = await findFarmsWithinRadius(
+      db,
+      lat,
+      lng,
+      radiusKm,
+      farmer.id,
+    );
 
     return ok(
       {

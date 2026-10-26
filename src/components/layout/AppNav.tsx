@@ -8,8 +8,11 @@ import {
   Map as MapIcon,
   Siren,
   Sprout,
+  UserRound,
 } from "lucide-react";
 
+import { SignOutButton } from "@/components/auth/SignOutButton";
+import { useSessionFarmer } from "@/components/auth/session";
 import { cn } from "@/lib/cn";
 
 const LINKS = [
@@ -21,6 +24,7 @@ const LINKS = [
 
 export function AppNav() {
   const pathname = usePathname();
+  const farmer = useSessionFarmer();
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
@@ -28,15 +32,15 @@ export function AppNav() {
   return (
     <>
       <header className="sticky top-0 z-[1000] border-b border-[var(--border)] bg-[var(--card)]/95 backdrop-blur">
-        <div className="mx-auto flex w-full max-w-5xl items-center justify-between gap-3 px-4 py-3 sm:px-6">
+        <div className="flex h-16 w-full items-center justify-between gap-3 px-4 sm:px-6">
           <Link
             href="/"
-            className="flex items-center gap-2 font-extrabold tracking-tight"
+            className="flex items-center gap-2.5 font-semibold tracking-tight"
           >
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-700 text-white shadow-sm">
-              <Leaf className="h-5 w-5" />
+              <Leaf className="h-[1.15rem] w-[1.15rem]" strokeWidth={2.4} />
             </span>
-            <span className="text-lg">
+            <span className="text-[1.35rem] leading-none">
               Agro
               <span className="text-brand-700 dark:text-brand-400">AI</span>
             </span>
@@ -48,7 +52,7 @@ export function AppNav() {
                 key={href}
                 href={href}
                 className={cn(
-                  "flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
+                  "flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium transition-colors duration-150",
                   isActive(href)
                     ? "bg-brand-700 text-white shadow-sm"
                     : "muted hover:bg-[var(--card-muted)] hover:text-[var(--foreground)]",
@@ -59,6 +63,16 @@ export function AppNav() {
               </Link>
             ))}
           </nav>
+
+          <div className="flex items-center gap-2">
+            {farmer ? (
+              <span className="hidden items-center gap-1.5 rounded-full bg-[var(--card-muted)] px-3 py-2 text-sm font-semibold sm:inline-flex">
+                <UserRound className="h-4 w-4 text-brand-700 dark:text-brand-400" />
+                <span className="max-w-32 truncate">{farmer.name}</span>
+              </span>
+            ) : null}
+            <SignOutButton compact />
+          </div>
         </div>
       </header>
 
@@ -66,7 +80,7 @@ export function AppNav() {
         aria-label="Primary"
         className="fixed inset-x-0 bottom-0 z-[1000] border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur md:hidden"
       >
-        <div className="mx-auto grid max-w-5xl grid-cols-4">
+        <div className="grid w-full grid-cols-4">
           {LINKS.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

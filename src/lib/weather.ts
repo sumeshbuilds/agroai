@@ -90,9 +90,18 @@ export async function fetchWeather(
     forecast_days: "7",
   });
 
-  const response = await fetch(`${OPEN_METEO_ENDPOINT}?${params.toString()}`, {
-    headers: { Accept: "application/json" },
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${OPEN_METEO_ENDPOINT}?${params.toString()}`, {
+      headers: { Accept: "application/json" },
+    });
+  } catch (cause) {
+    // Connection errors (e.g. `fetch failed`, connect timeouts) must surface as
+    // a weather upstream failure, not an unhandled 500.
+    throw new WeatherFetchError(
+      `Could not reach Open-Meteo (${cause instanceof Error ? cause.message : "network error"}).`,
+    );
+  }
 
   const payload = (await response.json()) as OpenMeteoResponse;
 

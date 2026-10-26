@@ -1,4 +1,4 @@
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import {
   crops,
@@ -8,6 +8,7 @@ import {
   weeklyReports,
   type Crop,
   type Farmland,
+  type Farmer,
   type IntrusionAlert,
   type WeeklyReport,
   type Database,
@@ -37,6 +38,7 @@ function toIso(value: Date | string | null | undefined): string | null {
 export function toFarmDTO(farm: Farmland): FarmDTO {
   return {
     id: farm.id,
+    farmerId: farm.farmerId,
     name: farm.name,
     points: (farm.polygonGeoJson ?? []) as GeoPoint[],
     centroidLat: farm.centroidLat,
@@ -59,6 +61,7 @@ export function toCropDTO(crop: Crop & { farmlandName?: string | null }): CropDT
     cropName: crop.cropName,
     sowingDate: toIso(crop.sowingDate) ?? new Date().toISOString(),
     growthStage: crop.growthStage,
+    durationDays: crop.durationDays ?? null,
     isActive: crop.isActive,
     ageDays,
     createdAt: toIso(crop.createdAt),
@@ -98,41 +101,55 @@ function toReportDTO(
   };
 }
 
-/** Returns the first farmer, creating a demo profile on an empty database. */
-export async function getOrCreateDemoFarmer(db: Database) {
-  const existing = await db
-    .select()
-    .from(farmers)
-    .orderBy(asc(farmers.id))
-    .limit(1);
-
-  if (existing.length > 0) return existing[0];
-
-  const inserted = await db
-    .insert(farmers)
-    .values({ name: "Demo Farmer", phone: "demo-0001", language: "en" })
-    .returning();
-
-  return inserted[0];
-}
-
 // ---------------------------------------------------------------------------
 // Farms
 // ---------------------------------------------------------------------------
 
-export async function listFarmlands(db: Database): Promise<FarmDTO[]> {
-  const rows = await db.select().from(farmlands).orderBy(desc(farmlands.createdAt));
+/**
+ * Lists farms. Pass `farmerId` to scope the result to one signed-in farmer;
+ * omit it only from server-side admin/cron code.
+ */
+export async function listFarmlands(
+  db: Database,
+  farmerId?: number,
+): Promise<FarmDTO[]> {
+  const rows = await db
+    .select()
+    .from(farmlands)
+    .where(farmerId === undefined ? undefined : eq(farmlands.farmerId, farmerId))
+    .orderBy(desc(farmlands.createdAt));
   return rows.map(toFarmDTO);
+}
+
+/**
+ * Farms that can be attached to a new account: either drawn during onboarding
+ * (no owner yet), or created before accounts existed (owned by the legacy
+ * "Demo Farmer", whose PIN hash is empty).
+ */
+export async function listAvailableFarmlands(db: Database): Promise<FarmDTO[]> {
+  const rows = await db
+    .select({ farm: farmlands })
+    .from(farmlands)
+    .leftJoin(farmers, eq(farmlands.farmerId, farmers.id))
+    .where(or(isNull(farmlands.farmerId), eq(farmers.pinHash, "")))
+    .orderBy(desc(farmlands.createdAt));
+
+  return rows.map((row) => toFarmDTO(row.farm));
 }
 
 export async function getFarmland(
   db: Database,
   id: number,
+  farmerId?: number,
 ): Promise<FarmDTO | null> {
   const rows = await db
     .select()
     .from(farmlands)
-    .where(eq(farmlands.id, id))
+    .where(
+      farmerId === undefined
+        ? eq(farmlands.id, id)
+        : and(eq(farmlands.id, id), eq(farmlands.farmerId, farmerId)),
+    )
     .limit(1);
 
   return rows.length > 0 ? toFarmDTO(rows[0]) : null;
@@ -140,16 +157,15 @@ export async function getFarmland(
 
 export async function createFarmland(
   db: Database,
-  input: { name: string; points: GeoPoint[]; farmerId?: number },
+  input: { name: string; points: GeoPoint[]; farmerId?: number | null },
 ): Promise<FarmDTO> {
-  const farmer = await getOrCreateDemoFarmer(db);
   const centroid = polygonCentroid(input.points);
   const areaAcres = polygonAreaAcres(input.points);
 
   const inserted = await db
     .insert(farmlands)
     .values({
-      farmerId: input.farmerId ?? farmer.id,
+      farmerId: input.farmerId ?? null,
       name: input.name,
       polygonGeoJson: input.points,
       centroidLat: centroid.lat,
@@ -162,6 +178,29 @@ export async function createFarmland(
 }
 
 /**
+ * Claims an unowned (or legacy pre-auth) farm for a new farmer. Returns null
+ * when the farm has already been claimed by a real account.
+ */
+export async function claimFarmland(
+  db: Database,
+  farmId: number,
+  farmerId: number,
+): Promise<FarmDTO | null> {
+  const rows = await db
+    .update(farmlands)
+    .set({ farmerId })
+    .where(
+      sql`${farmlands.id} = ${farmId} and (${farmlands.farmerId} is null or exists (
+        select 1 from ${farmers}
+        where ${farmers.id} = ${farmlands.farmerId} and ${farmers.pinHash} = ''
+      ))`,
+    )
+    .returning();
+
+  return rows.length > 0 ? toFarmDTO(rows[0]) : null;
+}
+
+/**
  * Haversine proximity search (no PostGIS required). Returns every farm whose
  * centroid lies within `radiusKm` of the given point, nearest first.
  */
@@ -170,6 +209,7 @@ export async function findFarmsWithinRadius(
   lat: number,
   lng: number,
   radiusKm: number,
+  farmerId?: number,
 ): Promise<AffectedFarmDTO[]> {
   const distance = sql<number>`(
     6371 * acos(
@@ -181,6 +221,12 @@ export async function findFarmsWithinRadius(
     )
   )`;
 
+  const radiusClause = sql`${distance} <= ${radiusKm}`;
+  const whereClause =
+    farmerId === undefined
+      ? radiusClause
+      : and(radiusClause, eq(farmlands.farmerId, farmerId));
+
   const rows = await db
     .select({
       id: farmlands.id,
@@ -190,7 +236,7 @@ export async function findFarmsWithinRadius(
       distanceKm: distance,
     })
     .from(farmlands)
-    .where(sql`${distance} <= ${radiusKm}`)
+    .where(whereClause)
     .orderBy(asc(distance));
 
   return rows.map((row) => {
@@ -214,11 +260,15 @@ export async function findFarmsWithinRadius(
 // Crops
 // ---------------------------------------------------------------------------
 
-export async function listCrops(db: Database): Promise<CropDTO[]> {
+export async function listCrops(
+  db: Database,
+  farmerId?: number,
+): Promise<CropDTO[]> {
   const rows = await db
     .select({ crop: crops, farmlandName: farmlands.name })
     .from(crops)
     .leftJoin(farmlands, eq(crops.farmlandId, farmlands.id))
+    .where(farmerId === undefined ? undefined : eq(farmlands.farmerId, farmerId))
     .orderBy(desc(crops.createdAt));
 
   return rows.map((row) => toCropDTO({ ...row.crop, farmlandName: row.farmlandName }));
@@ -231,6 +281,7 @@ export async function createCrop(
     sowingDate: Date;
     farmlandId?: number | null;
     growthStage?: string;
+    durationDays?: number | null;
   },
 ): Promise<CropDTO> {
   const inserted = await db
@@ -240,6 +291,7 @@ export async function createCrop(
       sowingDate: input.sowingDate,
       farmlandId: input.farmlandId ?? null,
       growthStage: input.growthStage ?? "Seedling",
+      durationDays: input.durationDays ?? null,
       isActive: true,
     })
     .returning();
@@ -251,23 +303,38 @@ export async function createCrop(
   return toCropDTO({ ...inserted[0], farmlandName });
 }
 
-export async function getCropWithFarm(db: Database, cropId: number) {
+export async function getCropWithFarm(
+  db: Database,
+  cropId: number,
+  farmerId?: number,
+) {
   const rows = await db
     .select({ crop: crops, farm: farmlands })
     .from(crops)
     .leftJoin(farmlands, eq(crops.farmlandId, farmlands.id))
-    .where(eq(crops.id, cropId))
+    .where(
+      farmerId === undefined
+        ? eq(crops.id, cropId)
+        : and(eq(crops.id, cropId), eq(farmlands.farmerId, farmerId)),
+    )
     .limit(1);
 
   return rows.length > 0 ? rows[0] : null;
 }
 
-export async function listActiveCropsWithFarm(db: Database) {
+export async function listActiveCropsWithFarm(
+  db: Database,
+  farmerId?: number,
+) {
   const rows = await db
     .select({ crop: crops, farm: farmlands })
     .from(crops)
     .leftJoin(farmlands, eq(crops.farmlandId, farmlands.id))
-    .where(eq(crops.isActive, true))
+    .where(
+      farmerId === undefined
+        ? eq(crops.isActive, true)
+        : and(eq(crops.isActive, true), eq(farmlands.farmerId, farmerId)),
+    )
     .orderBy(desc(crops.createdAt));
 
   return rows;
@@ -365,17 +432,22 @@ export async function createIntrusionAlert(
 
 export async function listReports(
   db: Database,
-  options: { limit?: number; cropId?: number } = {},
+  options: { limit?: number; cropId?: number; farmerId?: number } = {},
 ): Promise<WeeklyReportDTO[]> {
   const limit = options.limit ?? 20;
+
+  const filters = [];
+  if (options.cropId) filters.push(eq(weeklyReports.cropId, options.cropId));
+  if (options.farmerId !== undefined) {
+    filters.push(eq(farmlands.farmerId, options.farmerId));
+  }
 
   const rows = await db
     .select({ report: weeklyReports, cropName: crops.cropName })
     .from(weeklyReports)
     .leftJoin(crops, eq(weeklyReports.cropId, crops.id))
-    .where(
-      options.cropId ? eq(weeklyReports.cropId, options.cropId) : undefined,
-    )
+    .leftJoin(farmlands, eq(crops.farmlandId, farmlands.id))
+    .where(filters.length > 0 ? and(...filters) : undefined)
     .orderBy(desc(weeklyReports.createdAt))
     .limit(limit);
 
@@ -413,4 +485,87 @@ export async function createReport(
 export async function getCropsByIds(db: Database, ids: number[]) {
   if (ids.length === 0) return [];
   return db.select().from(crops).where(inArray(crops.id, ids));
+}
+
+// ---------------------------------------------------------------------------
+// Farmers / auth helpers
+// ---------------------------------------------------------------------------
+
+export async function findFarmerByName(
+  db: Database,
+  name: string,
+): Promise<Farmer | null> {
+  const key = name.trim().toLowerCase();
+  const rows = await db
+    .select()
+    .from(farmers)
+    .where(sql`lower(${farmers.name}) = ${key}`)
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+export async function getFarmerById(
+  db: Database,
+  farmerId: number,
+): Promise<Farmer | null> {
+  const rows = await db
+    .select()
+    .from(farmers)
+    .where(eq(farmers.id, farmerId))
+    .limit(1);
+
+  return rows[0] ?? null;
+}
+
+export async function createFarmer(
+  db: Database,
+  input: { name: string; pinHash: string },
+): Promise<Farmer> {
+  const inserted = await db
+    .insert(farmers)
+    .values({
+      name: input.name,
+      pinHash: input.pinHash,
+      language: "en",
+    })
+    .returning();
+
+  return inserted[0];
+}
+
+export async function getFarmerSetup(
+  db: Database,
+  farmerId: number,
+): Promise<{ hasFarm: boolean; hasCrop: boolean }> {
+  const [farm] = await db
+    .select({ id: farmlands.id })
+    .from(farmlands)
+    .where(eq(farmlands.farmerId, farmerId))
+    .limit(1);
+
+  const [crop] = await db
+    .select({ id: crops.id })
+    .from(crops)
+    .innerJoin(farmlands, eq(crops.farmlandId, farmlands.id))
+    .where(and(eq(farmlands.farmerId, farmerId), eq(crops.isActive, true)))
+    .limit(1);
+
+  return { hasFarm: Boolean(farm), hasCrop: Boolean(crop) };
+}
+
+/** Best-effort cleanup used when onboarding fails halfway through. */
+export async function deleteFarmerById(db: Database, farmerId: number): Promise<void> {
+  await db.delete(farmers).where(eq(farmers.id, farmerId));
+}
+
+export async function releaseFarmland(
+  db: Database,
+  farmId: number,
+  farmerId: number,
+): Promise<void> {
+  await db
+    .update(farmlands)
+    .set({ farmerId: null })
+    .where(and(eq(farmlands.id, farmId), eq(farmlands.farmerId, farmerId)));
 }

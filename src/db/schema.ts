@@ -12,10 +12,13 @@ import {
 import type { GeoPoint } from "@/lib/types";
 
 // 1. Farmers / Users Table
+// Login is name + PIN. The PIN is never stored in plain text — `pinHash` holds
+// a salted scrypt digest (`scrypt$<salt>$<hash>`).
 export const farmers = pgTable("farmers", {
   id: serial("id").primaryKey(),
-  name: text("name").notNull(),
-  phone: text("phone").notNull().unique(),
+  name: text("name").notNull().unique(),
+  phone: text("phone").unique(),
+  pinHash: text("pin_hash").notNull().default(""),
   language: text("language").default("en").notNull(),
   pushSubscription: jsonb("push_subscription"),
   createdAt: timestamp("created_at").defaultNow(),
@@ -40,6 +43,8 @@ export const crops = pgTable("crops", {
   cropName: text("crop_name").notNull(),
   sowingDate: timestamp("sowing_date").notNull(),
   growthStage: text("growth_stage").default("Seedling"),
+  /** Expected crop duration from sowing to harvest, in days. */
+  durationDays: integer("duration_days"),
   isActive: boolean("is_active").default(true),
   createdAt: timestamp("created_at").defaultNow(),
 });

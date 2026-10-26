@@ -64,6 +64,16 @@ const warningTone: Record<WeatherWarning["level"], string> = {
   danger: "chip-danger",
 };
 
+/** Formats the nowcast fetch time (ISO, UTC) into a local clock label. */
+function formatFetchedAt(iso: string): string | null {
+  const fetched = new Date(iso);
+  if (Number.isNaN(fetched.getTime())) return null;
+  return fetched.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function WeatherCard({
   weather,
   warnings,
@@ -75,59 +85,77 @@ export function WeatherCard({
   farmName?: string | null;
   loading?: boolean;
 }) {
+  // Derived during render: `fetchedAt` only exists once the API responds (the
+  // card renders client-side after the fetch resolves), so there is no SSR
+  // hydration mismatch.
+  const updatedAt = weather?.fetchedAt
+    ? formatFetchedAt(weather.fetchedAt)
+    : null;
+
   if (loading || !weather) {
     return <WeatherCardSkeleton />;
   }
 
   const days = weather.daily.slice(0, 7);
-  const globalMin = Math.min(...days.map((day) => day.tempMin));
-  const globalMax = Math.max(...days.map((day) => day.tempMax));
+  const globalMin = days.length ? Math.min(...days.map((day) => day.tempMin)) : 0;
+  const globalMax = days.length ? Math.max(...days.map((day) => day.tempMax)) : 0;
   const spread = Math.max(1, globalMax - globalMin);
 
   const currentTemp =
     weather.current.temperature ?? (days[0]?.tempMax ?? null);
+  const rainNow = weather.current.precipitation;
+  const windNow = weather.current.windSpeed;
 
   return (
     <section className="card overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3 sm:px-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:px-5">
         <div>
-          <h2 className="text-base font-bold">Weather</h2>
-          <p className="muted text-xs">
+          <h2 className="text-base font-semibold">Weather</h2>
+          <p className="muted mt-0.5 text-xs">
             {farmName ? `${farmName} · ` : ""}
-            {weather.latitude.toFixed(3)}, {weather.longitude.toFixed(3)} ·{" "}
-            {weather.timezone}
+            <span className="tabular-nums">
+              {weather.latitude.toFixed(3)}, {weather.longitude.toFixed(3)}
+            </span>{" "}
+            · {weather.timezone}
           </p>
         </div>
-        <span className="chip chip-brand">
+        <span
+          className="chip chip-brand tabular-nums"
+          title="Open-Meteo nowcast — conditions refresh every 15 minutes; soil moisture is a model estimate."
+        >
           <Sun className="h-3.5 w-3.5" />
-          Next 7 days
+          {updatedAt ? `Live · ${updatedAt}` : "Live nowcast"}
         </span>
       </header>
 
-      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
-        <div className="flex items-center gap-3 rounded-xl bg-brand-700 p-4 text-white sm:col-span-2 lg:col-span-1">
-          <Thermometer className="h-8 w-8 opacity-90" />
+      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
+        <div className="relative flex items-center gap-3 overflow-hidden rounded-xl bg-brand-700 p-4 text-white sm:col-span-2 xl:col-span-1">
+          <span
+            aria-hidden
+            className="pointer-events-none absolute -right-5 -top-6 h-24 w-24 rounded-full bg-white/10"
+          />
+          <Thermometer className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.8} />
           <div>
-            <p className="text-3xl font-extrabold leading-none">
+            <p className="text-4xl font-semibold leading-none tabular-nums tracking-tight">
               {currentTemp === null ? "--" : `${Math.round(currentTemp)}°`}
             </p>
-            <p className="text-xs font-medium opacity-90">
-              Now · {shortDate(days[0]?.date ?? "")}
+            <p className="mt-1 text-xs font-medium text-white/85">
+              Now · {days[0]?.date ? shortDate(days[0].date) : ""}
             </p>
           </div>
         </div>
 
         <Stat
           icon={<Droplets className="h-5 w-5 text-sky-500" />}
-          label="Rain today"
-          value={`${days[0]?.precipitationProbability ?? 0}%`}
-          hint={`${(days[0]?.precipitationSum ?? 0).toFixed(1)} mm`}
+          label="Rain now"
+          value={rainNow === null ? "--" : `${rainNow.toFixed(1)} mm`}
+          hint={`today ${(days[0]?.precipitationProbability ?? 0)}% · ${(days[0]?.precipitationSum ?? 0).toFixed(1)} mm`}
         />
         <Stat
           icon={<Wind className="h-5 w-5 text-sky-600" />}
-          label="Wind (max)"
-          value={`${Math.round(days[0]?.windSpeedMax ?? 0)}`}
-          hint="km/h"
+          label="Wind now"
+          value={windNow === null ? "--" : `${Math.round(windNow)} km/h`}
+          hint={`gusts up to ${Math.round(days[0]?.windSpeedMax ?? 0)} km/h today`}
         />
         <Stat
           icon={<Droplets className="h-5 w-5 text-soil-500" />}
@@ -137,7 +165,7 @@ export function WeatherCard({
               ? "--"
               : `${Math.round(weather.current.soilMoisture * 100)}%`
           }
-          hint="top 0–1 cm"
+          hint="model estimate · top 0–1 cm"
         />
       </div>
 
@@ -155,11 +183,11 @@ export function WeatherCard({
         </div>
       ) : (
         <div className="px-4 pb-4 sm:px-5">
-          <span className="chip chip-brand">No weather warnings 🎉</span>
+          <span className="chip chip-brand">No weather warnings</span>
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] p-4 sm:grid-cols-4 sm:p-5 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] bg-[var(--card-muted)]/40 p-4 sm:grid-cols-4 sm:p-5 2xl:grid-cols-7">
         {days.map((day, index) => {
           const Icon = weatherIconFor(day);
           const left = ((day.tempMin - globalMin) / spread) * 100;
@@ -173,13 +201,16 @@ export function WeatherCard({
               key={day.date}
               className="card-muted flex flex-col items-center gap-1.5 p-3"
             >
-              <p className="text-xs font-bold">
+              <p className="text-xs font-semibold">
                 {weekdayLabel(day.date, index)}
               </p>
-              <Icon className="h-6 w-6 text-brand-700 dark:text-brand-400" />
-              <p className="text-sm font-bold">
+              <Icon
+                className="h-6 w-6 text-brand-700 dark:text-brand-400"
+                strokeWidth={1.9}
+              />
+              <p className="text-sm font-semibold tabular-nums">
                 {Math.round(day.tempMax)}°
-                <span className="muted font-medium">
+                <span className="muted font-normal">
                   {" "}
                   / {Math.round(day.tempMin)}°
                 </span>
@@ -190,10 +221,11 @@ export function WeatherCard({
                   style={{ marginLeft: `${left}%`, width: `${width}%` }}
                 />
               </div>
-              <p className="text-[11px] font-semibold text-sky-600 dark:text-sky-400">
-                💧 {day.precipitationProbability}%
+              <p className="flex items-center gap-0.5 text-[11px] font-semibold tabular-nums text-sky-600 dark:text-sky-400">
+                <Droplets className="h-3 w-3" />
+                {day.precipitationProbability}%
               </p>
-              <p className="muted text-[11px]">
+              <p className="muted text-[11px] tabular-nums">
                 {Math.round(day.windSpeedMax)} km/h
               </p>
             </div>
@@ -218,14 +250,18 @@ function Stat({
   return (
     <div className="card-muted flex items-center gap-3 p-4">
       {icon}
-      <div>
-        <p className="muted text-xs font-medium">{label}</p>
-        <p className="text-xl font-bold leading-tight">
-          {value}
-          {hint ? (
-            <span className="muted ml-1 text-xs font-medium">{hint}</span>
-          ) : null}
+      <div className="min-w-0">
+        <p className="muted text-[11px] font-semibold uppercase tracking-[0.08em]">
+          {label}
         </p>
+        <p className="text-lg font-semibold leading-tight tabular-nums">
+          {value}
+        </p>
+        {hint ? (
+          <p className="muted mt-0.5 text-[11px] font-normal leading-snug">
+            {hint}
+          </p>
+        ) : null}
       </div>
     </div>
   );
@@ -238,7 +274,7 @@ function WeatherCardSkeleton() {
         <div className="h-5 w-28 animate-pulse-soft rounded bg-black/10 dark:bg-white/10" />
         <div className="h-6 w-24 animate-pulse-soft rounded-full bg-black/10 dark:bg-white/10" />
       </div>
-      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 lg:grid-cols-4">
+      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
@@ -246,7 +282,7 @@ function WeatherCardSkeleton() {
           />
         ))}
       </div>
-      <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] p-4 sm:grid-cols-4 sm:p-5 lg:grid-cols-7">
+      <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] p-4 sm:grid-cols-4 sm:p-5 2xl:grid-cols-7">
         {Array.from({ length: 7 }).map((_, index) => (
           <div
             key={index}
