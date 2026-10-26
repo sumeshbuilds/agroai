@@ -5,15 +5,15 @@ import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
+  Camera,
   Map as MapIcon,
   MapPin,
   RefreshCw,
-  Siren,
   Sparkles,
   Sprout,
+  Video,
 } from "lucide-react";
 
-import { AlertBanner, type ActiveAlert } from "@/components/alerts/AlertBanner";
 import { useSessionFarmer } from "@/components/auth/session";
 import { CropDayGuide } from "@/components/dashboard/CropDayGuide";
 import { PestSirenCard } from "@/components/dashboard/PestSirenCard";
@@ -22,12 +22,13 @@ import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { LiveWatchCard } from "@/components/watch/LiveWatchCard";
 import { WeatherCard } from "@/components/weather/WeatherCard";
 import { ApiError, api } from "@/lib/api-client";
+import type { CameraSessionDTO } from "@/lib/camera";
 import { useFarms } from "@/lib/hooks/use-farms";
-import { DANGER_RADIUS_KM, animalKind } from "@/lib/map";
 import { formatAcres, formatRelative } from "@/lib/format";
-import type { AlertDTO, CropDTO, WeeklyReportDTO } from "@/lib/types";
+import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
 import type { WeatherSnapshot, WeatherWarning } from "@/lib/weather";
 
 // Leaflet must never render on the server (ARCHITECTURE.md rule #1).
@@ -53,12 +54,12 @@ export function DashboardView() {
   const [warnings, setWarnings] = useState<WeatherWarning[]>([]);
   const [weatherLoading, setWeatherLoading] = useState(false);
 
-  const [alerts, setAlerts] = useState<AlertDTO[]>([]);
+  const [cameras, setCameras] = useState<CameraSessionDTO[]>([]);
+  const [camerasLoading, setCamerasLoading] = useState(true);
   const [reports, setReports] = useState<WeeklyReportDTO[]>([]);
   const [reportsLoading, setReportsLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [dismissed, setDismissed] = useState<Set<number>>(new Set());
 
   const selectedFarm = useMemo(
     () => farms.find((farm) => farm.id === farmId) ?? farms[0] ?? null,
@@ -108,28 +109,41 @@ export function DashboardView() {
   }, [loadReports]);
 
   useEffect(() => {
+    let active = true;
+
+    const load = async () => {
+      try {
+        const data = await api.listCameraSessions();
+        if (active) setCameras(data.sessions);
+      } catch {
+        // The rest of the dashboard works without live cameras.
+      } finally {
+        if (active) setCamerasLoading(false);
+      }
+    };
+
+    void load();
+    const timer = window.setInterval(load, 5000);
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedFarm) return;
     const activeFarm = selectedFarm;
-    const watch = { lat: activeFarm.centroidLat, lng: activeFarm.centroidLng };
 
     let cancelled = false;
 
     const load = async () => {
       setWeatherLoading(true);
       try {
-        const [weatherRes, alertsRes] = await Promise.all([
-          api.getWeatherByFarm(activeFarm.id),
-          api.listAlerts({
-            lat: watch.lat,
-            lng: watch.lng,
-            radiusKm: DANGER_RADIUS_KM,
-            limit: 5,
-          }),
-        ]);
+        const weatherRes = await api.getWeatherByFarm(activeFarm.id);
         if (cancelled) return;
         setWeather(weatherRes.weather);
         setWarnings(weatherRes.warnings);
-        setAlerts(alertsRes.alerts);
       } catch (cause) {
         if (!cancelled) {
           setNotice(
@@ -155,23 +169,6 @@ export function DashboardView() {
     };
   }, [selectedFarm]);
 
-  const activeAlert = useMemo<ActiveAlert | null>(() => {
-    const nearest = alerts[0];
-    if (!nearest || dismissed.has(nearest.id)) return null;
-
-    const kind = animalKind(nearest.animalType);
-
-    return {
-      animalType: kind.label,
-      emoji: kind.emoji,
-      farmName: selectedFarm?.name ?? "your farm",
-      distanceKm: nearest.distanceKm ?? 0,
-      direction: nearest.direction ?? "nearby",
-      severity: nearest.severity,
-      createdAt: nearest.createdAt,
-    };
-  }, [alerts, dismissed, selectedFarm]);
-
   const handleGenerate = async () => {
     setGenerating(true);
     setNotice(null);
@@ -195,6 +192,8 @@ export function DashboardView() {
 
   const hasFarms = farms.length > 0;
   const totalAcres = farms.reduce((sum, farm) => sum + (farm.areaAcres ?? 0), 0);
+  const liveCamera =
+    cameras.find((camera) => camera.isLive) ?? cameras[0] ?? null;
   const liveAt = weather?.fetchedAt
     ? new Date(weather.fetchedAt).toLocaleTimeString(undefined, {
         hour: "2-digit",
@@ -223,6 +222,17 @@ export function DashboardView() {
                   {farms.length} {farms.length === 1 ? "field" : "fields"} ·{" "}
                   {formatAcres(totalAcres)}
                 </span>
+                {liveCamera?.isLive ? (
+                  <>
+                    <span aria-hidden className="opacity-40">
+                      ·
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-danger-700 dark:text-red-400">
+                      <Camera className="h-3.5 w-3.5" />
+                      {liveCamera.name} live
+                    </span>
+                  </>
+                ) : null}
                 {liveAt ? (
                   <>
                     <span aria-hidden className="opacity-40">
@@ -240,12 +250,16 @@ export function DashboardView() {
 
         {hasFarms ? (
           <div className="flex flex-wrap items-center gap-2">
-            {alerts.length > 0 ? (
+            {liveCamera?.isLive ? (
               <span className="chip chip-danger">
-                <Siren className="h-3.5 w-3.5" />
-                {alerts.length} nearby
+                <Camera className="h-3.5 w-3.5" />
+                Camera live
               </span>
             ) : null}
+            <Link href="/watch" className="btn btn-secondary">
+              <Video className="h-4 w-4" />
+              Live watch
+            </Link>
             <Link href="/map" className="btn btn-secondary">
               <MapIcon className="h-4 w-4" />
               Manage fields
@@ -254,23 +268,11 @@ export function DashboardView() {
         ) : null}
       </header>
 
-      {needsSetup || notice || activeAlert ? (
+      {needsSetup || notice ? (
         <div className="space-y-3 pb-4">
           {needsSetup ? <SetupNotice showDatabase /> : null}
 
           {notice ? <Callout tone="info">{notice}</Callout> : null}
-
-          {activeAlert ? (
-            <AlertBanner
-              key={`${activeAlert.animalType}-${activeAlert.createdAt ?? ""}`}
-              alert={activeAlert}
-              onDismiss={() => {
-                if (alerts[0]) {
-                  setDismissed((current) => new Set(current).add(alerts[0].id));
-                }
-              }}
-            />
-          ) : null}
         </div>
       ) : null}
 
@@ -311,15 +313,17 @@ export function DashboardView() {
             <FarmMap
               farms={farms}
               selectedFarm={selectedFarm}
-              sightings={alerts}
+              cameras={cameras}
               onSelectFarm={setFarmId}
               onRefresh={() => void refresh()}
               refreshing={farmsLoading}
             />
           </div>
 
-          {/* Right column — weather, then the farm guide */}
+          {/* Right column — live camera, weather, then the farm guide */}
           <div className="flex flex-col gap-4">
+            <LiveWatchCard session={liveCamera} loading={camerasLoading} />
+
             <WeatherCard
               weather={weather}
               warnings={warnings}
@@ -407,14 +411,6 @@ export function DashboardView() {
                   Latest advisory generated {formatRelative(reports[0].createdAt)}
                 </p>
               ) : null}
-
-              <Link
-                href="/simulate"
-                className="muted inline-flex items-center gap-1.5 text-xs font-semibold transition-colors hover:text-[var(--foreground)]"
-              >
-                <Siren className="h-3.5 w-3.5" />
-                Simulate a wildlife intrusion nearby
-              </Link>
             </section>
           </div>
         </section>

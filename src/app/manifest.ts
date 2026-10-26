@@ -5,7 +5,7 @@ export default function manifest(): MetadataRoute.Manifest {
     name: "AgroAI — Smart farming for every field",
     short_name: "AgroAI",
     description:
-      "Farmland mapping, hyper-local weather, AI weekly crop advice and wildlife intrusion alerts.",
+      "Farmland mapping, hyper-local weather, AI weekly crop advice and a live phone-powered field camera.",
     start_url: "/",
     display: "standalone",
     background_color: "#f4f7f2",

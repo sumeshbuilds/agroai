@@ -3,9 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /**
- * Two-tone Web Audio siren used by the intrusion alert banner. A user gesture
- * (the map tap that caused the alert) is normally present, which lets the
- * browser start audio without being blocked.
+ * Two-tone Web Audio siren used by the pest-risk card. The user taps a button
+ * before it plays, so browsers allow audio without an extra gesture.
  */
 export function useSiren() {
   const contextRef = useRef<AudioContext | null>(null);

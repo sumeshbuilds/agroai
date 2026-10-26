@@ -1,27 +1,21 @@
-import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 
 import {
   crops,
   farmlands,
   farmers,
-  intrusionAlerts,
   weeklyReports,
   type Crop,
   type Farmland,
   type Farmer,
-  type IntrusionAlert,
   type WeeklyReport,
   type Database,
 } from "@/db";
 import {
-  bearingDegrees,
-  compassDirection,
   polygonAreaAcres,
   polygonCentroid,
 } from "./geo";
 import type {
-  AffectedFarmDTO,
-  AlertDTO,
   CropDTO,
   FarmDTO,
   GeoPoint,
@@ -65,24 +59,6 @@ export function toCropDTO(crop: Crop & { farmlandName?: string | null }): CropDT
     isActive: crop.isActive,
     ageDays,
     createdAt: toIso(crop.createdAt),
-  };
-}
-
-export function toAlertDTO(
-  alert: IntrusionAlert,
-  distanceKm?: number,
-  direction?: string,
-): AlertDTO {
-  return {
-    id: alert.id,
-    animalType: alert.animalType,
-    lat: alert.lat,
-    lng: alert.lng,
-    source: alert.source,
-    severity: alert.severity,
-    createdAt: toIso(alert.createdAt),
-    distanceKm,
-    direction,
   };
 }
 
@@ -200,62 +176,6 @@ export async function claimFarmland(
   return rows.length > 0 ? toFarmDTO(rows[0]) : null;
 }
 
-/**
- * Haversine proximity search (no PostGIS required). Returns every farm whose
- * centroid lies within `radiusKm` of the given point, nearest first.
- */
-export async function findFarmsWithinRadius(
-  db: Database,
-  lat: number,
-  lng: number,
-  radiusKm: number,
-  farmerId?: number,
-): Promise<AffectedFarmDTO[]> {
-  const distance = sql<number>`(
-    6371 * acos(
-      least(1.0, greatest(-1.0,
-        cos(radians(${lat})) * cos(radians(${farmlands.centroidLat})) *
-        cos(radians(${farmlands.centroidLng}) - radians(${lng})) +
-        sin(radians(${lat})) * sin(radians(${farmlands.centroidLat}))
-      ))
-    )
-  )`;
-
-  const radiusClause = sql`${distance} <= ${radiusKm}`;
-  const whereClause =
-    farmerId === undefined
-      ? radiusClause
-      : and(radiusClause, eq(farmlands.farmerId, farmerId));
-
-  const rows = await db
-    .select({
-      id: farmlands.id,
-      name: farmlands.name,
-      centroidLat: farmlands.centroidLat,
-      centroidLng: farmlands.centroidLng,
-      distanceKm: distance,
-    })
-    .from(farmlands)
-    .where(whereClause)
-    .orderBy(asc(distance));
-
-  return rows.map((row) => {
-    const bearing = bearingDegrees(
-      row.centroidLat,
-      row.centroidLng,
-      lat,
-      lng,
-    );
-    return {
-      farmId: row.id,
-      name: row.name,
-      distanceKm: Number(row.distanceKm),
-      direction: compassDirection(bearing),
-      bearingDegrees: bearing,
-    };
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Crops
 // ---------------------------------------------------------------------------
@@ -338,92 +258,6 @@ export async function listActiveCropsWithFarm(
     .orderBy(desc(crops.createdAt));
 
   return rows;
-}
-
-// ---------------------------------------------------------------------------
-// Intrusion alerts
-// ---------------------------------------------------------------------------
-
-export async function listAlerts(
-  db: Database,
-  options: { limit?: number; lat?: number; lng?: number; radiusKm?: number } = {},
-): Promise<AlertDTO[]> {
-  const limit = options.limit ?? 20;
-
-  if (options.lat !== undefined && options.lng !== undefined) {
-    const distance = sql<number>`(
-      6371 * acos(
-        least(1.0, greatest(-1.0,
-          cos(radians(${options.lat})) * cos(radians(${intrusionAlerts.lat})) *
-          cos(radians(${intrusionAlerts.lng}) - radians(${options.lng})) +
-          sin(radians(${options.lat})) * sin(radians(${intrusionAlerts.lat}))
-        ))
-      )
-    )`;
-
-    const radiusClause =
-      options.radiusKm !== undefined
-        ? sql`${distance} <= ${options.radiusKm}`
-        : undefined;
-
-    const rows = await db
-      .select({
-        id: intrusionAlerts.id,
-        animalType: intrusionAlerts.animalType,
-        lat: intrusionAlerts.lat,
-        lng: intrusionAlerts.lng,
-        source: intrusionAlerts.source,
-        severity: intrusionAlerts.severity,
-        createdAt: intrusionAlerts.createdAt,
-        distanceKm: distance,
-      })
-      .from(intrusionAlerts)
-      .where(radiusClause)
-      .orderBy(asc(distance))
-      .limit(limit);
-
-    return rows.map((row) =>
-      toAlertDTO(
-        row as unknown as IntrusionAlert,
-        Number(row.distanceKm),
-        compassDirection(
-          bearingDegrees(options.lat!, options.lng!, row.lat, row.lng),
-        ),
-      ),
-    );
-  }
-
-  const rows = await db
-    .select()
-    .from(intrusionAlerts)
-    .orderBy(desc(intrusionAlerts.createdAt))
-    .limit(limit);
-
-  return rows.map((row) => toAlertDTO(row));
-}
-
-export async function createIntrusionAlert(
-  db: Database,
-  input: {
-    animalType: string;
-    lat: number;
-    lng: number;
-    source?: string;
-    severity?: string;
-  },
-): Promise<AlertDTO> {
-  const inserted = await db
-    .insert(intrusionAlerts)
-    .values({
-      animalType: input.animalType,
-      lat: input.lat,
-      lng: input.lng,
-      source: input.source ?? "SIMULATED_SIGHTING",
-      severity: input.severity ?? "HIGH",
-    })
-    .returning();
-
-  return toAlertDTO(inserted[0]);
 }
 
 // ---------------------------------------------------------------------------

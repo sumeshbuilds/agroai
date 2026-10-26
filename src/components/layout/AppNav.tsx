@@ -6,9 +6,9 @@ import {
   LayoutDashboard,
   Leaf,
   Map as MapIcon,
-  Siren,
   Sprout,
   UserRound,
+  Video,
 } from "lucide-react";
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
@@ -19,7 +19,7 @@ const LINKS = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/map", label: "Farm Map", icon: MapIcon },
   { href: "/crops", label: "Crops", icon: Sprout },
-  { href: "/simulate", label: "Alerts", icon: Siren },
+  { href: "/watch", label: "Live Watch", icon: Video },
 ];
 
 export function AppNav() {

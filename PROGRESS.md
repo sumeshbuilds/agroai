@@ -327,3 +327,96 @@ production build (`next start`) with live Neon/Open-Meteo data.
 - Live e2e against Neon: claim legacy farm ? register ? `me`/farms/crops scoped ?
   Open-Meteo weather ? pest risk (moderate) ? Gemini report (live) ? logout 401 ?
   wrong PIN 401 ? correct login 200. Test rows were removed afterwards.
+
+---
+
+## 10. Live field camera + satellite/weather polish (26 Oct 2026)
+
+**Fake alarm system removed**
+
+- Deleted `/simulate`, `SimulateView`, `SimulatorMap`, `AlertBanner`, the
+  `/api/alerts` + `/api/alerts/check` routes, the `intrusion_alerts` schema and
+  all simulated-sighting queries. Migration `0003_remove_simulated_alerts.sql`
+  drops the old table. No alert in the app is synthetic any more.
+
+**Phone camera (`/camera?token=…`, standalone, no login)**
+
+- Random token pairing created from `/watch`; token is scoped to one farmer and
+  one session.
+- `getUserMedia` rear camera with flip, torch (when supported), screen wake lock
+  and optional GPS.
+- **On-device COCO-SSD** via TensorFlow.js WebGL (`tfjs-core`,
+  `tfjs-converter`, `tfjs-backend-webgl`, `@tensorflow-models/coco-ssd`), plus a
+  frame-differencing motion fallback so the demo keeps working while the ~6 MB
+  model downloads or if WebGL is unavailable.
+- IoU tracker gives stable track ids, confidence, path, direction and speed.
+- Uploads a ≤560 px JPEG (~30–60 KB) every 800 ms with normalised boxes + GPS.
+  Raw video never leaves the phone.
+- Secure-context detection with explicit HTTPS / Android-flag / `dev:https`
+  instructions; `npm run dev:https` script added.
+
+**Laptop live watch (`/watch`, auth-gated)**
+
+- QR pairing card built with `react-qr-code`; LAN IP resolved server-side
+  (`/api/camera/network`) so `localhost` is replaced with a phone-reachable URL.
+- Near-live player: versioned JPEG frame + moving boxes + SVG movement trails +
+  live/offline state, frame-age badge, scanline.
+- Detection feed (one row per new track) with category chips; people, animals,
+  vehicles and motion stats; AI/motion mode badge.
+- Field context: nearest satellite-mapped farm + distance/compass direction, GPS,
+  live Open-Meteo weather at the camera location.
+- Stop / restart / delete session. Restarting lets the phone pair again.
+
+**Satellite + area**
+
+- Map page now shows total mapped land in **acres + ha + m²**, field parcels, live
+  camera count, hectares on the drawing chip, and live camera markers on the
+  satellite map.
+- Dashboard map receives live camera markers; `LiveWatchCard` replaces the old
+  alert banner and shows the newest frame + current people/animals counts.
+
+**Database**
+
+- New tables `camera_sessions` (latest frame, overlay detections, motion, GPS,
+  pairing token) and `camera_detections` (one row per new track with box,
+  confidence, direction, speed, GPS).
+- Migrations `0002_live_camera_tables.sql` + `0003_remove_simulated_alerts.sql`
+  generated and applied to Neon branch `production`; `npm run db:push` now
+  reports “No changes detected”.
+
+**Verification**
+
+```
+npx tsc --noEmit   → 0 errors
+npm run lint       → 0 errors, 0 warnings
+npm run build      → succeeds (23 routes)
+```
+
+Live API e2e (production server, Neon):
+
+| Check | Result |
+| --- | --- |
+| register + signed session cookie | 201 |
+| camera sessions require auth | 401 |
+| LAN network address endpoint | 200 (`10.16.169.125`) |
+| create pairing session | 201, random token |
+| token pairing lookup | 200 (waiting) |
+| ingest JPEG frame + person detection | 200, detection logged |
+| session detail / live state / frame dimensions | 200, live, 1280×720 |
+| stored JPEG frame endpoint | 200, `image/jpeg`, 517 bytes |
+| duplicate track in next frame | not duplicated in feed |
+| second track (elephant) | logged, label/emoji enriched |
+| weather by camera GPS | 200, live Open-Meteo |
+| stop session → token ingest | 409 `STREAM_STOPPED` |
+| restart → list → delete | 200 / 200 / 200 |
+
+Headless-Chrome test with a real browser page: `/camera` pair link renders,
+**Start camera stream** acquired a fake media stream, COCO-SSD loaded
+(`aiEnabled: true`) and frames reached `/watch` (`isLive: true`, frame age 2 s,
+`connected` chip). Screenshots reviewed at 1440 px and 430 px. Test farmer /
+farm / camera rows removed afterwards.
+
+**Current limitation:** the live transport is ~1 fps JPEG snapshots (not WebRTC),
+so latency is ~1.5–2.5 s. That is deliberate: it needs no signalling server,
+works over a phone hotspot, and keeps the Neon/free tier and mobile data use low.
+

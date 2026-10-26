@@ -1,12 +1,15 @@
 import type {
-  AffectedFarmDTO,
-  AlertDTO,
   CropDTO,
   FarmDTO,
   FarmerDTO,
   GeoPoint,
   WeeklyReportDTO,
 } from "./types";
+import type {
+  CameraDetectionDTO,
+  CameraIngestPayload,
+  CameraSessionDTO,
+} from "./camera";
 import type { PestRiskAssessment } from "./pest-risk";
 import type { WeatherSnapshot, WeatherWarning } from "./weather";
 
@@ -50,13 +53,6 @@ export interface WeatherResponse {
   farmName: string | null;
   weather: WeatherSnapshot;
   warnings: WeatherWarning[];
-}
-
-export interface AlertCheckResponse {
-  alert: AlertDTO;
-  radiusKm: number;
-  affectedFarms: AffectedFarmDTO[];
-  atRisk: boolean;
 }
 
 export interface ReportGenerationResponse {
@@ -136,36 +132,57 @@ export const api = {
       `/api/pest-risk${cropId !== undefined ? `?cropId=${cropId}` : ""}`,
     ),
 
-  listAlerts: (options?: {
-    lat?: number;
-    lng?: number;
-    radiusKm?: number;
-    limit?: number;
-  }) => {
-    const params = new URLSearchParams();
-    if (options?.lat !== undefined) params.set("lat", String(options.lat));
-    if (options?.lng !== undefined) params.set("lng", String(options.lng));
-    if (options?.radiusKm !== undefined)
-      params.set("radiusKm", String(options.radiusKm));
-    if (options?.limit !== undefined) params.set("limit", String(options.limit));
-    const query = params.toString();
-    return request<{ alerts: AlertDTO[] }>(
-      `/api/alerts${query ? `?${query}` : ""}`,
-    );
-  },
+  listCameraSessions: () =>
+    request<{ sessions: CameraSessionDTO[] }>("/api/camera/sessions"),
 
-  checkAlert: (input: {
-    animalType: string;
-    lat: number;
-    lng: number;
-    source?: string;
-    severity?: string;
-    radiusKm?: number;
-  }) =>
-    request<AlertCheckResponse>("/api/alerts/check", {
+  createCameraSession: (name: string) =>
+    request<{ session: CameraSessionDTO }>("/api/camera/sessions", {
       method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+
+  getCameraSession: (id: number) =>
+    request<{
+      session: CameraSessionDTO;
+      detections: CameraDetectionDTO[];
+    }>(`/api/camera/sessions/${id}`),
+
+  updateCameraSession: (
+    id: number,
+    input: { status?: "waiting" | "live" | "ended"; name?: string },
+  ) =>
+    request<{ session: CameraSessionDTO }>(`/api/camera/sessions/${id}`, {
+      method: "PATCH",
       body: JSON.stringify(input),
     }),
+
+  deleteCameraSession: (id: number) =>
+    request<{ removed: boolean }>(`/api/camera/sessions/${id}`, {
+      method: "DELETE",
+    }),
+
+  /** Public (token-scoped) pairing info used by the phone page. */
+  getCameraPairing: (token: string) =>
+    request<{ session: CameraSessionDTO; farmerName: string }>(
+      `/api/camera/stream/${encodeURIComponent(token)}`,
+    ),
+
+  /** Uploads one frame + detections from the phone (token auth, no cookie). */
+  postCameraFrame: (token: string, payload: CameraIngestPayload) =>
+    request<{
+      ok: boolean;
+      sessionId: number;
+      frameUpdatedAt: string | null;
+      newDetections: unknown[];
+    }>(`/api/camera/stream/${encodeURIComponent(token)}`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  getCameraNetwork: () =>
+    request<{ addresses: Array<{ address: string; interface: string }> }>(
+      "/api/camera/network",
+    ),
 
   listReports: (options?: { limit?: number; cropId?: number }) => {
     const params = new URLSearchParams();

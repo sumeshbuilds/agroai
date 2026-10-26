@@ -355,6 +355,27 @@
   animation: pulse-soft 1.6s ease-in-out infinite;
 }
 
+@keyframes live-scan {
+  0% {
+    top: -20%;
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    top: 120%;
+    opacity: 0;
+  }
+}
+
+.live-scanline {
+  animation: live-scan 7s linear infinite;
+}
+
 /* ---------------------------------------------------------------------------
    Leaflet integration
 --------------------------------------------------------------------------- */

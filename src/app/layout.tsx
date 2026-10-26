@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     template: "%s · AgroAI",
   },
   description:
-    "Map your farmland, get hyper-local 7-day weather, AI weekly crop advice, and instant wildlife intrusion alerts.",
+    "Map your farmland, get hyper-local 7-day weather, AI weekly crop advice, and a live phone-powered camera that tracks animals and people on your field.",
   applicationName: "AgroAI",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "AgroAI", statusBarStyle: "default" },

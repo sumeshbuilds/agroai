@@ -18,6 +18,8 @@ import { Crosshair, Ruler, Save, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { ApiError, api } from "@/lib/api-client";
+import type { CameraSessionDTO } from "@/lib/camera";
+import { formatLandArea } from "@/lib/format";
 import { polygonAreaAcres, polygonCentroid } from "@/lib/geo";
 import {
   DEFAULT_CENTER,
@@ -26,7 +28,7 @@ import {
   ESRI_WORLD_IMAGERY_URL,
   FARM_ZOOM,
 } from "@/lib/map";
-import type { AlertDTO, FarmDTO, GeoPoint } from "@/lib/types";
+import type { FarmDTO, GeoPoint } from "@/lib/types";
 
 function DrawEvents({
   onPoint,
@@ -43,11 +45,11 @@ function DrawEvents({
 
 export function MapDrawer({
   farms,
-  sightings = [],
+  cameras = [],
   onSaved,
 }: {
   farms: FarmDTO[];
-  sightings?: AlertDTO[];
+  cameras?: CameraSessionDTO[];
   onSaved?: (farm: FarmDTO) => void;
 }) {
   const mapRef = useRef<LeafletMap | null>(null);
@@ -176,7 +178,7 @@ export function MapDrawer({
         <div className="flex flex-wrap items-center gap-2 text-sm">
           <span className="chip chip-brand">
             <Ruler className="h-3.5 w-3.5" />
-            {area.toFixed(2)} acres
+            {formatLandArea(area)}
           </span>
           <span className="muted text-xs">
             {points.length} corner{points.length === 1 ? "" : "s"} · tap the map
@@ -218,23 +220,27 @@ export function MapDrawer({
             />
           ))}
 
-          {sightings.map((sighting) => (
-            <CircleMarker
-              key={`sighting-${sighting.id}`}
-              center={[sighting.lat, sighting.lng]}
-              radius={8}
-              pathOptions={{
-                color: "#ffffff",
-                weight: 2,
-                fillColor: "#ef4444",
-                fillOpacity: 0.95,
-              }}
-            >
-              <Tooltip>
-                {sighting.animalType} · {sighting.distanceKm?.toFixed(1) ?? "?"} km
-              </Tooltip>
-            </CircleMarker>
-          ))}
+          {cameras
+            .filter(
+              (camera) => camera.lat !== null && camera.lng !== null,
+            )
+            .map((camera) => (
+              <CircleMarker
+                key={`camera-${camera.id}`}
+                center={[camera.lat!, camera.lng!]}
+                radius={camera.isLive ? 10 : 7}
+                pathOptions={{
+                  color: "#ffffff",
+                  weight: 2,
+                  fillColor: camera.isLive ? "#0ea5e9" : "#64748b",
+                  fillOpacity: 0.95,
+                }}
+              >
+                <Tooltip>
+                  📷 {camera.name} · {camera.isLive ? "LIVE" : camera.status}
+                </Tooltip>
+              </CircleMarker>
+            ))}
 
           {points.length === 2 ? (
             <Polyline

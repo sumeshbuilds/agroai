@@ -44,28 +44,6 @@ export interface CropDTO {
   createdAt: string | null;
 }
 
-export interface AlertDTO {
-  id: number;
-  animalType: string;
-  lat: number;
-  lng: number;
-  source: string | null;
-  severity: string | null;
-  createdAt: string | null;
-  /** Distance from the query point / farm, when requested. */
-  distanceKm?: number;
-  /** Compass direction from the farm towards the sighting. */
-  direction?: string;
-}
-
-export interface AffectedFarmDTO {
-  farmId: number;
-  name: string;
-  distanceKm: number;
-  direction: string;
-  bearingDegrees: number;
-}
-
 export interface WeeklyReportDTO {
   id: number;
   cropId: number | null;

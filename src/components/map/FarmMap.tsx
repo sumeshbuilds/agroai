@@ -14,17 +14,19 @@ import {
   Map as MapIcon,
   RefreshCw,
   Ruler,
-  ScanEye,
+  Video,
 } from "lucide-react";
 
+import type { CameraSessionDTO } from "@/lib/camera";
 import { cn } from "@/lib/cn";
+import { formatLandArea } from "@/lib/format";
 import { ESRI_ATTRIBUTION, ESRI_WORLD_IMAGERY_URL, FARM_ZOOM } from "@/lib/map";
-import type { AlertDTO, FarmDTO, GeoPoint } from "@/lib/types";
+import type { FarmDTO, GeoPoint } from "@/lib/types";
 
 interface FarmMapProps {
   farms: FarmDTO[];
   selectedFarm?: FarmDTO | null;
-  sightings?: AlertDTO[];
+  cameras?: CameraSessionDTO[];
   onSelectFarm?: (farmId: number) => void;
   onRefresh?: () => void;
   refreshing?: boolean;
@@ -105,13 +107,13 @@ function EmptyFarmMap() {
 
 /**
  * Read-only dashboard map for the sketched layout: a tall satellite panel on
- * the left showing the selected farmland, its centre marker and the latest
- * nearby hazard sightings. Boundary drawing stays on /map.
+ * the left showing the selected farmland, its centre marker and any live
+ * phone-camera positions. Boundary drawing stays on /map.
  */
 export function FarmMap({
   farms,
   selectedFarm = null,
-  sightings = [],
+  cameras = [],
   onSelectFarm,
   onRefresh,
   refreshing = false,
@@ -165,23 +167,25 @@ export function FarmMap({
           }}
         />
 
-        {sightings.map((sighting) => (
-          <CircleMarker
-            key={`sighting-${sighting.id}`}
-            center={[sighting.lat, sighting.lng]}
-            radius={8}
-            pathOptions={{
-              color: "#ffffff",
-              weight: 2,
-              fillColor: "#ef4444",
-              fillOpacity: 0.95,
-            }}
-          >
-            <Tooltip>
-              {sighting.animalType} · {sighting.distanceKm?.toFixed(1) ?? "?"} km
-            </Tooltip>
-          </CircleMarker>
-        ))}
+        {cameras
+          .filter((camera) => camera.lat !== null && camera.lng !== null)
+          .map((camera) => (
+            <CircleMarker
+              key={`camera-${camera.id}`}
+              center={[camera.lat!, camera.lng!]}
+              radius={camera.isLive ? 10 : 7}
+              pathOptions={{
+                color: "#ffffff",
+                weight: 2,
+                fillColor: camera.isLive ? "#0ea5e9" : "#64748b",
+                fillOpacity: 0.95,
+              }}
+            >
+              <Tooltip>
+                📷 {camera.name} · {camera.isLive ? "LIVE" : camera.status}
+              </Tooltip>
+            </CircleMarker>
+          ))}
 
         <CircleMarker
           center={center}
@@ -217,7 +221,7 @@ export function FarmMap({
       <div className="absolute bottom-3 left-3 z-[500] flex flex-wrap items-center gap-2">
         <span className="chip bg-white/95 text-slate-900 backdrop-blur">
           <Ruler className="h-3 w-3" />
-          {(selectedFarm.areaAcres ?? 0).toFixed(1)} acres
+          {formatLandArea(selectedFarm.areaAcres)}
         </span>
         <span className="chip bg-white/95 text-slate-900 backdrop-blur">
           <Layers className="h-3 w-3" />
@@ -244,12 +248,12 @@ export function FarmMap({
           <span className="hidden sm:inline">Draw / edit boundary</span>
         </Link>
         <Link
-          href="/simulate"
-          aria-label="Open the intrusion simulator"
+          href="/watch"
+          aria-label="Open live camera watch"
           className="flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur transition-colors hover:bg-white sm:px-3"
         >
-          <ScanEye className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Intrusion sim</span>
+          <Video className="h-3.5 w-3.5" />
+          <span className="hidden sm:inline">Live watch</span>
         </Link>
         <LocateMe mapRef={mapRef} />
       </div>

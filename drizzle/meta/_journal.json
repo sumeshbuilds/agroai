@@ -15,6 +15,20 @@
       "when": 1792645899283,
       "tag": "0001_happy_nextwave",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793032556472,
+      "tag": "0002_live_camera_tables",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793032566338,
+      "tag": "0003_remove_simulated_alerts",
+      "breakpoints": true
     }
   ]
 }

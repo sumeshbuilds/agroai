@@ -1,0 +1,1 @@
+DROP TABLE "intrusion_alerts" CASCADE;

@@ -35,3 +35,21 @@ export function formatAcres(acres: number | null | undefined): string {
   if (acres === null || acres === undefined) return "—";
   return `${acres.toFixed(2)} acres`;
 }
+
+export const SQUARE_METRES_PER_ACRE = 4046.8564224;
+export const HECTARES_PER_ACRE = 0.40468564224;
+
+export function acresToHectares(acres: number): number {
+  return acres * HECTARES_PER_ACRE;
+}
+
+export function acresToSquareMetres(acres: number): number {
+  return acres * SQUARE_METRES_PER_ACRE;
+}
+
+/** "2.50 acres · 1.01 ha" — used on map + field cards. */
+export function formatLandArea(acres: number | null | undefined): string {
+  if (acres === null || acres === undefined) return "—";
+  return `${acres.toFixed(2)} acres · ${acresToHectares(acres).toFixed(2)} ha`;
+}
+
