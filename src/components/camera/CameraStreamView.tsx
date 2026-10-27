@@ -11,12 +11,14 @@ import type { ObjectDetection } from "@tensorflow-models/coco-ssd";
 import Link from "next/link";
 import {
   Activity,
+  BellRing,
   Camera,
   CameraOff,
   CheckCircle2,
   Crosshair,
   FlipHorizontal,
   Flashlight,
+  Gauge,
   Loader2,
   MapPin,
   Radio,
@@ -26,6 +28,7 @@ import {
   TriangleAlert,
   Wifi,
   WifiOff,
+  Zap,
 } from "lucide-react";
 
 import { ApiError, api } from "@/lib/api-client";
@@ -33,12 +36,18 @@ import {
   CATEGORY_COLORS,
   clamp01,
   enrichDetection,
+  isTrackableClass,
   objectMeta,
+  TRACK_CONFIRM_CONFIDENCE,
+  TRACK_CONFIRM_HITS,
+  TRACK_MEMORY_MS,
+  type CameraAlertDTO,
   type CameraIngestPayload,
   type CameraSessionDTO,
   type DetectionBox,
   type FrameDetection,
   type IngestDetection,
+  type TrackedCategory,
 } from "@/lib/camera";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 
@@ -48,14 +57,18 @@ type UploadState = "idle" | "ok" | "error" | "stopped";
 interface TrackState {
   id: string;
   objectClass: string;
+  category: TrackedCategory;
   confidence: number;
   box: DetectionBox;
   center: [number, number];
   area: number;
   path: Array<[number, number]>;
+  firstSeen: number;
   lastSeen: number;
   lastStep: number;
+  hits: number;
   moving: boolean;
+  confirmed: boolean;
   direction?: string;
   speed?: number;
 }
@@ -69,6 +82,30 @@ interface GeoState {
 interface WakeLockLike {
   release: () => Promise<void>;
 }
+
+interface NetworkProfile {
+  saveData: boolean;
+  effectiveType: string;
+  slow: boolean;
+}
+
+interface ConnectionLike {
+  saveData?: boolean;
+  effectiveType?: string;
+  addEventListener?: (type: string, listener: () => void) => void;
+  removeEventListener?: (type: string, listener: () => void) => void;
+}
+
+const DETECT_MAX_WIDTH = 416;
+/** Detection cadence (ms): moving object, idle scene, hidden tab. */
+const DETECT_INTERVAL_ACTIVE = 350;
+const DETECT_INTERVAL_IDLE = 950;
+const DETECT_INTERVAL_HIDDEN = 2_500;
+/** Upload cadence (ms). */
+const UPLOAD_INTERVAL_ACTIVE = 700;
+const UPLOAD_INTERVAL_IDLE = 2_600;
+const UPLOAD_INTERVAL_SLOW = 5_000;
+const IDLE_UPLOAD_INTERVAL_SLOW = 6_500;
 
 function iou(a: DetectionBox, b: DetectionBox): number {
   const [ax, ay, aw, ah] = a;
@@ -86,13 +123,18 @@ function centerDistance(a: [number, number], b: [number, number]): number {
   return Math.hypot(a[0] - b[0], a[1] - b[1]);
 }
 
-function trackPrefix(objectClass: string): string {
-  const category = objectMeta(objectClass).category;
-  if (category === "person") return "p";
-  if (category === "animal") return "a";
-  if (category === "vehicle") return "v";
-  if (category === "motion") return "m";
-  return "o";
+function smoothBox(previous: DetectionBox, next: DetectionBox): DetectionBox {
+  const alpha = 0.62;
+  return [
+    previous[0] + (next[0] - previous[0]) * alpha,
+    previous[1] + (next[1] - previous[1]) * alpha,
+    previous[2] + (next[2] - previous[2]) * alpha,
+    previous[3] + (next[3] - previous[3]) * alpha,
+  ];
+}
+
+function trackPrefix(category: TrackedCategory): string {
+  return category === "person" ? "p" : "a";
 }
 
 function describeDirection(
@@ -100,9 +142,9 @@ function describeDirection(
   dy: number,
   areaRatio: number,
 ): string | undefined {
-  if (areaRatio > 1.18) return "coming closer";
-  if (areaRatio < 0.85) return "moving away";
-  if (Math.hypot(dx, dy) < 0.003) return undefined;
+  if (areaRatio > 1.16) return "coming closer";
+  if (areaRatio < 0.86) return "moving away";
+  if (Math.hypot(dx, dy) < 0.004) return undefined;
   if (Math.abs(dx) > Math.abs(dy) * 1.2) {
     return dx > 0 ? "moving right" : "moving left";
   }
@@ -116,6 +158,37 @@ function deviceLabel(): string {
   if (/iPad/i.test(ua)) return "iPad camera";
   if (/Android/i.test(ua)) return "Android camera";
   return "Mobile camera";
+}
+
+function networkProfile(): NetworkProfile {
+  if (typeof navigator === "undefined") {
+    return { saveData: false, effectiveType: "", slow: false };
+  }
+  const connection = (
+    navigator as Navigator & { connection?: ConnectionLike }
+  ).connection;
+  const saveData = Boolean(connection?.saveData);
+  const effectiveType = connection?.effectiveType ?? "";
+  const slow =
+    saveData || effectiveType === "slow-2g" || effectiveType === "2g";
+
+  return { saveData, effectiveType, slow };
+}
+
+/** Keeps the strongest box when the model reports near-duplicates. */
+function suppressDuplicates<
+  T extends { box: DetectionBox; confidence: number; category: TrackedCategory },
+>(items: T[]): T[] {
+  const sorted = [...items].sort((a, b) => b.confidence - a.confidence);
+  const kept: T[] = [];
+  for (const item of sorted) {
+    const duplicate = kept.some(
+      (other) =>
+        other.category === item.category && iou(other.box, item.box) > 0.6,
+    );
+    if (!duplicate) kept.push(item);
+  }
+  return kept;
 }
 
 export function CameraStreamView() {
@@ -134,6 +207,7 @@ export function CameraStreamView() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const captureRef = useRef<HTMLCanvasElement | null>(null);
+  const detectCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const motionCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const prevLumRef = useRef<Uint8ClampedArray | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -145,12 +219,14 @@ export function CameraStreamView() {
   const runningRef = useRef(false);
   const tracksRef = useRef<Map<string, TrackState>>(new Map());
   const counterRef = useRef(0);
+  const runIdRef = useRef("");
   const motionRef = useRef(0);
-  const motionBoxRef = useRef<DetectionBox | null>(null);
+  const lastMotionAtRef = useRef(0);
   const geoRef = useRef<GeoState | null>(null);
   const wakeLockRef = useRef<WakeLockLike | null>(null);
   const watchIdRef = useRef<number | null>(null);
   const lastSignatureRef = useRef("");
+  const alertTimerRef = useRef(0);
 
   const [pairing, setPairing] = useState<{
     session: CameraSessionDTO;
@@ -168,16 +244,21 @@ export function CameraStreamView() {
   const [aiError, setAiError] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>("idle");
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [groqQueued, setGroqQueued] = useState(false);
 
   const [uploads, setUploads] = useState(0);
   const [motionPct, setMotionPct] = useState(0);
   const [gps, setGps] = useState<GeoState | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [detections, setDetections] = useState<FrameDetection[]>([]);
+  const [phoneAlert, setPhoneAlert] = useState<CameraAlertDTO | null>(null);
   const [facing, setFacing] = useState<"environment" | "user">("environment");
   const [torchOn, setTorchOn] = useState(false);
   const [torchSupported, setTorchSupported] = useState(false);
   const [elapsed, setElapsed] = useState(0);
+  const [network, setNetwork] = useState<NetworkProfile>(() =>
+    networkProfile(),
+  );
 
   const isEnded = pairing?.session.status === "ended";
   const linkError =
@@ -185,6 +266,9 @@ export function CameraStreamView() {
       ? "This page needs a camera link. Open Live Watch on the laptop and scan its QR code."
       : pairingError;
   const pairingBusy = token ? pairingLoading : false;
+  const verifiedCount = detections.filter(
+    (detection) => detection.source === "groq",
+  ).length;
 
   // ---- pairing -----------------------------------------------------------
   useEffect(() => {
@@ -218,6 +302,18 @@ export function CameraStreamView() {
     };
   }, [token]);
 
+  // Track slow connections so quality/cadence can adapt automatically.
+  useEffect(() => {
+    const connection = (
+      navigator as Navigator & { connection?: ConnectionLike }
+    ).connection;
+    if (!connection?.addEventListener) return;
+
+    const update = () => setNetwork(networkProfile());
+    connection.addEventListener("change", update);
+    return () => connection.removeEventListener?.("change", update);
+  }, []);
+
   // ---- AI model ----------------------------------------------------------
   const loadAi = useCallback(async () => {
     if (aiReadyRef.current || aiLoadingRef.current) return;
@@ -228,8 +324,15 @@ export function CameraStreamView() {
     try {
       const tf = await import("@tensorflow/tfjs-core");
       await import("@tensorflow/tfjs-backend-webgl");
-      await tf.setBackend("webgl");
-      await tf.ready();
+
+      try {
+        await tf.setBackend("webgl");
+        await tf.ready();
+      } catch {
+        // CPU is slower but keeps detection alive on old GPUs.
+        await tf.setBackend("cpu");
+        await tf.ready();
+      }
 
       const cocoSsd = await import("@tensorflow-models/coco-ssd");
       modelRef.current = await cocoSsd.load({ base: "lite_mobilenet_v2" });
@@ -240,8 +343,8 @@ export function CameraStreamView() {
       setAiState("unavailable");
       setAiError(
         cause instanceof Error
-          ? `AI detector unavailable — falling back to motion mode (${cause.message}).`
-          : "AI detector unavailable — falling back to motion mode.",
+          ? `AI detector unavailable — movement assist only (${cause.message}).`
+          : "AI detector unavailable — movement assist only.",
       );
     } finally {
       aiLoadingRef.current = false;
@@ -264,8 +367,11 @@ export function CameraStreamView() {
     setUploadState("idle");
     setUploadError(null);
     setDetections([]);
+    setGroqQueued(false);
     tracksRef.current.clear();
     lastSignatureRef.current = "";
+    prevLumRef.current = null;
+    window.clearTimeout(alertTimerRef.current);
 
     if (watchIdRef.current !== null && typeof navigator !== "undefined") {
       navigator.geolocation?.clearWatch(watchIdRef.current);
@@ -306,6 +412,7 @@ export function CameraStreamView() {
             facingMode: { ideal: nextFacing },
             width: { ideal: 1280 },
             height: { ideal: 720 },
+            frameRate: { ideal: 20, max: 30 },
           },
           audio: false,
         });
@@ -318,7 +425,7 @@ export function CameraStreamView() {
         await video.play().catch(() => undefined);
 
         // Some phones resolve getUserMedia before the first frame is decoded.
-        // Wait for real dimensions so uploads never send a 0×0/placeholder JPEG.
+        // Wait for real dimensions so uploads never send a placeholder JPEG.
         if (video.videoWidth < 32 || video.videoHeight < 32) {
           await new Promise<void>((resolve) => {
             let settled = false;
@@ -344,10 +451,18 @@ export function CameraStreamView() {
         }
 
         runningRef.current = true;
+        // Track ids must be unique across page reloads, otherwise the server's
+        // 15-minute dedupe would swallow the next person as "already seen".
+        runIdRef.current = Math.random().toString(36).slice(2, 7);
+        tracksRef.current.clear();
+        lastSignatureRef.current = "";
+        prevLumRef.current = null;
+        motionRef.current = 0;
         setStarted(true);
         setElapsed(0);
         setFacing(nextFacing);
         setUploadState("idle");
+        setNetwork(networkProfile());
 
         // Torch is available on some Android rear cameras.
         const track = stream.getVideoTracks()[0];
@@ -389,7 +504,11 @@ export function CameraStreamView() {
               setGpsError(
                 "Location blocked. Allow location for field weather and map distance.",
               ),
-            { enableHighAccuracy: true, maximumAge: 10_000, timeout: 15_000 },
+            {
+              enableHighAccuracy: true,
+              maximumAge: 20_000,
+              timeout: 20_000,
+            },
           );
         } else {
           setGpsError("This browser does not share location.");
@@ -434,6 +553,7 @@ export function CameraStreamView() {
         navigator.geolocation?.clearWatch(watchIdRef.current);
       }
       void wakeLockRef.current?.release().catch(() => undefined);
+      window.clearTimeout(alertTimerRef.current);
     },
     [],
   );
@@ -458,22 +578,60 @@ export function CameraStreamView() {
     const now = performance.now();
 
     try {
-      const predictions = await model.detect(video, 15, 0.42);
+      // Run the model on a downscaled canvas: roughly 4× fewer pixels than the
+      // 1280×720 preview, which is the biggest phone-side lag win.
+      const canvas =
+        detectCanvasRef.current ??
+        (detectCanvasRef.current = document.createElement("canvas"));
+      const width = Math.min(
+        DETECT_MAX_WIDTH,
+        Math.max(160, Math.round(video.videoWidth)),
+      );
+      const height = Math.max(1, Math.round((width / video.videoWidth) * video.videoHeight));
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const context = canvas.getContext("2d", { willReadFrequently: false });
+      if (!context) return;
+      context.drawImage(video, 0, 0, width, height);
+
+      const predictions = await model.detect(canvas, 20, 0.35);
+
+      const candidates = suppressDuplicates(
+        predictions
+          .filter(
+            (prediction) =>
+              isTrackableClass(prediction.class) && prediction.score >= 0.35,
+          )
+          .map((prediction) => {
+            const [px, py, pw, ph] = prediction.bbox;
+            const box: DetectionBox = [
+              clamp01(px / width),
+              clamp01(py / height),
+              clamp01(pw / width),
+              clamp01(ph / height),
+            ];
+            const meta = objectMeta(prediction.class);
+            const category: TrackedCategory =
+              meta.category === "person" ? "person" : "animal";
+            return {
+              objectClass: prediction.class.trim().toLowerCase(),
+              confidence: prediction.score,
+              box,
+              category,
+            };
+          })
+          .filter(
+            (candidate) => candidate.box[2] >= 0.03 && candidate.box[3] >= 0.03,
+          ),
+      );
+
       const tracks = tracksRef.current;
       const matched = new Set<string>();
 
-      for (const prediction of predictions) {
-        const [px, py, pw, ph] = prediction.bbox;
-        const vw = video.videoWidth || 1;
-        const vh = video.videoHeight || 1;
-        const box: DetectionBox = [
-          clamp01(px / vw),
-          clamp01(py / vh),
-          clamp01(pw / vw),
-          clamp01(ph / vh),
-        ];
-        if (box[2] < 0.02 || box[3] < 0.02) continue;
-
+      for (const candidate of candidates) {
+        const box = candidate.box;
         const center: [number, number] = [
           box[0] + box[2] / 2,
           box[1] + box[3] / 2,
@@ -484,12 +642,23 @@ export function CameraStreamView() {
 
         for (const [id, track] of tracks) {
           if (matched.has(id)) continue;
-          if (track.objectClass !== prediction.class) continue;
-          if (now - track.lastSeen > 1600) continue;
+          if (now - track.lastSeen > TRACK_MEMORY_MS) continue;
+
           const overlap = iou(track.box, box);
           const distance = centerDistance(track.center, center);
-          if (overlap < 0.12 && distance > 0.14) continue;
-          const score = distance + (1 - overlap) * 0.1;
+          const sameClass = track.objectClass === candidate.objectClass;
+          const sameCategory = track.category === candidate.category;
+
+          // Same species can move further between frames; a category flip
+          // (dog ↔ cow) still needs meaningful overlap so tracks do not merge.
+          if (sameClass) {
+            if (overlap < 0.12 && distance > 0.16) continue;
+          } else if (!sameCategory || overlap < 0.38 || distance > 0.12) {
+            continue;
+          }
+
+          const score =
+            distance + (1 - overlap) * 0.18 + (sameClass ? 0 : 0.06);
           if (score < bestScore) {
             bestScore = score;
             bestId = id;
@@ -498,44 +667,71 @@ export function CameraStreamView() {
 
         if (bestId) {
           const track = tracks.get(bestId)!;
-          const dt = Math.max(0.08, (now - track.lastStep) / 1000);
-          const dx = center[0] - track.center[0];
-          const dy = center[1] - track.center[1];
-          const areaRatio = (box[2] * box[3]) / Math.max(0.0001, track.area);
+          const dt = Math.max(0.1, (now - track.lastStep) / 1000);
+          const smoothed = smoothBox(track.box, box);
+          const smoothCenter: [number, number] = [
+            smoothed[0] + smoothed[2] / 2,
+            smoothed[1] + smoothed[3] / 2,
+          ];
+          const dx = smoothCenter[0] - track.center[0];
+          const dy = smoothCenter[1] - track.center[1];
+          const areaRatio =
+            (smoothed[2] * smoothed[3]) / Math.max(0.0001, track.area);
           const stepDistance = Math.hypot(dx, dy);
 
-          track.confidence = Math.max(prediction.score, track.confidence * 0.6);
-          track.box = box;
-          track.center = center;
-          track.area = box[2] * box[3];
+          track.hits += 1;
+          // Exponential smoothing keeps the overlay stable without adding lag.
+          track.confidence = track.confidence * 0.55 + candidate.confidence * 0.45;
+          track.box = smoothed;
+          track.center = smoothCenter;
+          track.area = smoothed[2] * smoothed[3];
           track.lastSeen = now;
           track.lastStep = now;
           track.moving = stepDistance > 0.004;
           track.direction = describeDirection(dx, dy, areaRatio);
           track.speed = clamp01(stepDistance / dt) * 100;
-          track.path = [...track.path.slice(-13), center];
+
+          if (!track.confirmed) {
+            track.confirmed =
+              (track.hits >= TRACK_CONFIRM_HITS &&
+                track.confidence >= TRACK_CONFIRM_CONFIDENCE) ||
+              (track.confidence >= 0.82 && track.hits >= 2);
+          }
+
+          if (stepDistance > 0.008) {
+            track.path = [...track.path.slice(-15), smoothCenter];
+          } else {
+            const lastPoint = track.path[track.path.length - 1] ?? smoothCenter;
+            track.path = [...track.path.slice(-15), lastPoint];
+          }
+
           matched.add(bestId);
         } else {
           counterRef.current += 1;
-          const id = `${trackPrefix(prediction.class)}${counterRef.current}`;
+          const id = `${trackPrefix(candidate.category)}${counterRef.current}-${runIdRef.current}`;
           tracks.set(id, {
             id,
-            objectClass: prediction.class,
-            confidence: prediction.score,
+            objectClass: candidate.objectClass,
+            category: candidate.category,
+            confidence: candidate.confidence,
             box,
             center,
             area: box[2] * box[3],
             path: [center],
+            firstSeen: now,
             lastSeen: now,
             lastStep: now,
+            hits: 1,
             moving: false,
+            confirmed:
+              candidate.confidence >= 0.92 && motionRef.current > 0.02,
           });
           matched.add(id);
         }
       }
 
       for (const [id, track] of tracks) {
-        if (now - track.lastSeen > 2600) tracks.delete(id);
+        if (now - track.lastSeen > TRACK_MEMORY_MS) tracks.delete(id);
       }
     } catch (cause) {
       // Keep the camera streaming; the model may recover on the next tick.
@@ -545,11 +741,12 @@ export function CameraStreamView() {
     }
   }, []);
 
-  // ---- motion fallback ---------------------------------------------------
+  // ---- motion (trigger + diagnostics only, never a tracked object) -------
   const sampleMotion = useCallback(() => {
     const video = videoRef.current;
     if (
       !runningRef.current ||
+      document.visibilityState !== "visible" ||
       !video ||
       video.readyState < 2 ||
       video.videoWidth < 32
@@ -560,8 +757,8 @@ export function CameraStreamView() {
     const canvas =
       motionCanvasRef.current ??
       (motionCanvasRef.current = document.createElement("canvas"));
-    const width = 160;
-    const height = 90;
+    const width = 128;
+    const height = 72;
     if (canvas.width !== width || canvas.height !== height) {
       canvas.width = width;
       canvas.height = height;
@@ -582,36 +779,11 @@ export function CameraStreamView() {
     const previous = prevLumRef.current;
     if (previous) {
       let changed = 0;
-      let minX = width;
-      let minY = height;
-      let maxX = 0;
-      let maxY = 0;
-
       for (let j = 0; j < lum.length; j += 1) {
-        if (Math.abs(lum[j] - previous[j]) > 26) {
-          changed += 1;
-          const x = j % width;
-          const y = Math.floor(j / width);
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
-        }
+        if (Math.abs(lum[j] - previous[j]) > 26) changed += 1;
       }
-
-      const ratio = changed / (width * height);
-      motionRef.current = ratio;
-
-      if (changed > 12) {
-        motionBoxRef.current = [
-          clamp01((minX - 3) / width),
-          clamp01((minY - 3) / height),
-          clamp01((maxX - minX + 7) / width),
-          clamp01((maxY - minY + 7) / height),
-        ];
-      } else {
-        motionBoxRef.current = null;
-      }
+      motionRef.current = changed / (width * height);
+      if (changed > 6) lastMotionAtRef.current = performance.now();
     }
 
     prevLumRef.current = lum;
@@ -620,42 +792,23 @@ export function CameraStreamView() {
   // ---- payload + upload --------------------------------------------------
   const buildDetections = useCallback((): IngestDetection[] => {
     const now = performance.now();
-    const tracks = [...tracksRef.current.values()].filter(
-      (track) => now - track.lastSeen < 1800,
-    );
 
-    if (tracks.length === 0) {
-      const motion = motionRef.current;
-      const box = motionBoxRef.current;
-      if (motion > 0.015 && box) {
-        return [
-          {
-            trackId: "motion-1",
-            objectClass: "motion",
-            confidence: clamp01(0.25 + motion * 8),
-            box,
-            moving: true,
-            direction: "movement in frame",
-            speed: motion * 100,
-            path: [
-              [box[0] + box[2] / 2, box[1] + box[3] / 2],
-            ],
-          },
-        ];
-      }
-      return [];
-    }
-
-    return tracks.map((track) => ({
-      trackId: track.id,
-      objectClass: track.objectClass,
-      confidence: track.confidence,
-      box: track.box,
-      moving: track.moving,
-      direction: track.direction,
-      speed: track.speed,
-      path: track.path,
-    }));
+    return [...tracksRef.current.values()]
+      .filter((track) => now - track.lastSeen < 1_100)
+      .map((track) => ({
+        trackId: track.id,
+        objectClass: track.objectClass,
+        confidence: track.confidence,
+        box: track.box,
+        moving: track.moving,
+        direction: track.direction,
+        speed: track.speed,
+        path: track.path,
+        // Only a temporally stable track may raise an alarm server-side.
+        confirmed:
+          track.confirmed && now - track.lastSeen < 700,
+        hits: track.hits,
+      }));
   }, []);
 
   const uploadFrame = useCallback(async () => {
@@ -675,45 +828,80 @@ export function CameraStreamView() {
     uploadBusyRef.current = true;
 
     try {
+      const profile = networkProfile();
+      const active = tracksRef.current.size > 0;
+      const targetWidth = active
+        ? profile.slow
+          ? 360
+          : 560
+        : profile.slow
+          ? 320
+          : 460;
+      const width = Math.min(targetWidth, video.videoWidth);
+      const height = Math.max(
+        1,
+        Math.round((video.videoHeight / video.videoWidth) * width),
+      );
+
       const canvas =
         captureRef.current ??
         (captureRef.current = document.createElement("canvas"));
-      const targetWidth = Math.min(560, video.videoWidth);
-      const targetHeight = Math.max(
-        1,
-        Math.round((video.videoHeight / video.videoWidth) * targetWidth),
-      );
-
-      if (canvas.width !== targetWidth || canvas.height !== targetHeight) {
-        canvas.width = targetWidth;
-        canvas.height = targetHeight;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
       }
 
       const context = canvas.getContext("2d");
       if (!context) throw new Error("Could not prepare the frame.");
-      context.drawImage(video, 0, 0, targetWidth, targetHeight);
+      context.drawImage(video, 0, 0, width, height);
 
-      const frame = canvas.toDataURL("image/jpeg", 0.55);
+      const quality = active
+        ? profile.slow
+          ? 0.4
+          : 0.55
+        : profile.slow
+          ? 0.34
+          : 0.46;
+
+      // `toBlob` + multipart avoids the ~33% base64 overhead on mobile data.
+      const blob = await new Promise<Blob | null>((resolve) =>
+        canvas.toBlob(resolve, "image/jpeg", quality),
+      );
+      if (!blob) throw new Error("Could not encode the frame.");
+
       const geo = geoRef.current;
-
-      const payload: CameraIngestPayload = {
-        frame,
+      const meta: Omit<CameraIngestPayload, "frame"> = {
         frameWidth: video.videoWidth,
         frameHeight: video.videoHeight,
         aiEnabled: aiReadyRef.current,
         deviceLabel: deviceLabel(),
         capturedAt: new Date().toISOString(),
         motion: motionRef.current,
+        quality: profile.slow ? "low" : active ? "high" : "balanced",
         detections: buildDetections(),
         ...(geo ? { lat: geo.lat, lng: geo.lng } : {}),
       };
 
-      await api.postCameraFrame(token, payload);
+      const response = await api.postCameraFrameMultipart(token, meta, blob);
 
       if (!runningRef.current) return;
       setUploads((count) => count + 1);
       setUploadState("ok");
       setUploadError(null);
+      if (response.verificationQueued) setGroqQueued(true);
+
+      const newestAlert = response.newAlerts[0];
+      if (newestAlert) {
+        setPhoneAlert(newestAlert);
+        if (typeof navigator.vibrate === "function") {
+          navigator.vibrate([120, 80, 120]);
+        }
+        window.clearTimeout(alertTimerRef.current);
+        alertTimerRef.current = window.setTimeout(
+          () => setPhoneAlert(null),
+          12_000,
+        );
+      }
     } catch (cause) {
       if (
         cause instanceof ApiError &&
@@ -740,7 +928,7 @@ export function CameraStreamView() {
     const signature = next
       .map(
         (item) =>
-          `${item.trackId}:${item.label}:${item.confidence.toFixed(2)}:${item.box
+          `${item.trackId}:${item.label}:${item.confirmed ? "1" : "0"}:${item.confidence.toFixed(2)}:${item.box
             .map((value) => value.toFixed(2))
             .join(",")}:${item.direction ?? ""}`,
       )
@@ -753,20 +941,79 @@ export function CameraStreamView() {
     setMotionPct(Math.round(motionRef.current * 1000) / 10);
   }, [buildDetections]);
 
-  // ---- loops -------------------------------------------------------------
+  // ---- adaptive loops ----------------------------------------------------
   useEffect(() => {
     if (!started) return;
 
-    const detectTimer = window.setInterval(() => void runDetection(), 420);
-    const motionTimer = window.setInterval(sampleMotion, 150);
-    const uploadTimer = window.setInterval(() => void uploadFrame(), 800);
-    const displayTimer = window.setInterval(syncDisplay, 250);
-    const clockTimer = window.setInterval(() => setElapsed((value) => value + 1), 1000);
+    let stopped = false;
+    let detectTimer = 0;
+    let motionTimer = 0;
+    let uploadTimer = 0;
+
+    const scheduleDetect = () => {
+      if (stopped) return;
+      const hidden = document.visibilityState !== "visible";
+      const motionRecent = performance.now() - lastMotionAtRef.current < 1_500;
+      const delay = hidden
+        ? DETECT_INTERVAL_HIDDEN
+        : motionRecent || tracksRef.current.size > 0
+          ? DETECT_INTERVAL_ACTIVE
+          : DETECT_INTERVAL_IDLE;
+
+      detectTimer = window.setTimeout(async () => {
+        await runDetection();
+        scheduleDetect();
+      }, delay);
+    };
+
+    const scheduleMotion = () => {
+      if (stopped) return;
+      const delay =
+        document.visibilityState !== "visible"
+          ? 1_200
+          : performance.now() - lastMotionAtRef.current < 2_000
+            ? 180
+            : 320;
+
+      motionTimer = window.setTimeout(() => {
+        sampleMotion();
+        scheduleMotion();
+      }, delay);
+    };
+
+    const scheduleUpload = () => {
+      if (stopped) return;
+      const profile = networkProfile();
+      const active = tracksRef.current.size > 0;
+      const delay = profile.slow
+        ? active
+          ? UPLOAD_INTERVAL_SLOW
+          : IDLE_UPLOAD_INTERVAL_SLOW
+        : active
+          ? UPLOAD_INTERVAL_ACTIVE
+          : UPLOAD_INTERVAL_IDLE;
+
+      uploadTimer = window.setTimeout(async () => {
+        if (document.visibilityState === "visible") await uploadFrame();
+        scheduleUpload();
+      }, delay);
+    };
+
+    scheduleDetect();
+    scheduleMotion();
+    scheduleUpload();
+
+    const displayTimer = window.setInterval(syncDisplay, 220);
+    const clockTimer = window.setInterval(
+      () => setElapsed((value) => value + 1),
+      1000,
+    );
 
     return () => {
-      window.clearInterval(detectTimer);
-      window.clearInterval(motionTimer);
-      window.clearInterval(uploadTimer);
+      stopped = true;
+      window.clearTimeout(detectTimer);
+      window.clearTimeout(motionTimer);
+      window.clearTimeout(uploadTimer);
       window.clearInterval(displayTimer);
       window.clearInterval(clockTimer);
     };
@@ -780,7 +1027,7 @@ export function CameraStreamView() {
 
     const draw = (time: number) => {
       raf = window.requestAnimationFrame(draw);
-      if (time - lastDraw < 60) return;
+      if (time - lastDraw < 90) return;
       lastDraw = time;
 
       const canvas = overlayRef.current;
@@ -805,9 +1052,8 @@ export function CameraStreamView() {
       const now = performance.now();
 
       for (const track of tracksRef.current.values()) {
-        if (now - track.lastSeen > 1800) continue;
-        const meta = objectMeta(track.objectClass);
-        const color = CATEGORY_COLORS[meta.category];
+        if (now - track.lastSeen > 1_100) continue;
+        const color = CATEGORY_COLORS[track.category];
         const [x, y, w, h] = track.box;
         const px = x * width;
         const py = y * height;
@@ -830,10 +1076,15 @@ export function CameraStreamView() {
         }
 
         context.strokeStyle = color;
-        context.lineWidth = 2.5 * dpr;
+        context.lineWidth = (track.confirmed ? 3 : 1.75) * dpr;
+        if (!track.confirmed) context.setLineDash([6 * dpr, 4 * dpr]);
         context.strokeRect(px, py, pw, ph);
+        context.setLineDash([]);
 
-        const label = `${meta.emoji} ${meta.label} ${Math.round(track.confidence * 100)}%`;
+        const meta = objectMeta(track.objectClass);
+        const label = `${meta.emoji} ${meta.label} ${Math.round(
+          track.confidence * 100,
+        )}%${track.confirmed ? " ✓" : ""}`;
         context.font = `600 ${12 * dpr}px ui-sans-serif, system-ui, sans-serif`;
         const textWidth = context.measureText(label).width;
         const labelHeight = 22 * dpr;
@@ -892,11 +1143,37 @@ export function CameraStreamView() {
   };
 
   const aiBadge = useMemo(() => {
-    if (aiState === "ready") return { label: "AI ready", tone: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30" };
-    if (aiState === "loading") return { label: "Loading AI…", tone: "bg-sky-400/15 text-sky-300 border-sky-400/30" };
-    if (aiState === "unavailable") return { label: "Motion mode", tone: "bg-amber-400/15 text-amber-300 border-amber-400/30" };
-    return { label: "AI idle", tone: "bg-white/5 text-slate-300 border-white/10" };
-  }, [aiState]);
+    if (aiState === "ready") {
+      return {
+        label: verifiedCount > 0 ? "AI verified" : "AI ready",
+        tone: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30",
+      };
+    }
+    if (aiState === "loading") {
+      return {
+        label: "Loading AI…",
+        tone: "bg-sky-400/15 text-sky-300 border-sky-400/30",
+      };
+    }
+    if (aiState === "unavailable") {
+      return {
+        label: "Motion assist",
+        tone: "bg-amber-400/15 text-amber-300 border-amber-400/30",
+      };
+    }
+    return {
+      label: "AI idle",
+      tone: "bg-white/5 text-slate-300 border-white/10",
+    };
+  }, [aiState, verifiedCount]);
+
+  const qualityLabel = network.slow
+    ? network.saveData
+      ? "Data saver"
+      : "2G"
+    : network.effectiveType
+      ? network.effectiveType.toUpperCase()
+      : "Auto";
 
   return (
     <main className="min-h-dvh bg-slate-950 text-slate-100">
@@ -995,6 +1272,26 @@ export function CameraStreamView() {
           </div>
         ) : null}
 
+        {phoneAlert ? (
+          <div className="animate-rise flex items-center gap-3 rounded-2xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-sm text-red-100">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-xl">
+              {phoneAlert.emoji}
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="flex items-center gap-1.5 font-bold">
+                <BellRing className="h-4 w-4" />
+                Alarm sent to dashboard
+              </p>
+              <p className="text-xs text-red-100/80">
+                {phoneAlert.message}
+                {phoneAlert.confidence
+                  ? ` · ${Math.round(phoneAlert.confidence * 100)}% confidence`
+                  : ""}
+              </p>
+            </div>
+          </div>
+        ) : null}
+
         <div
           className={
             started
@@ -1043,19 +1340,22 @@ export function CameraStreamView() {
                       <span className="text-white/60">
                         {Math.round(detection.confidence * 100)}%
                       </span>
+                      {detection.confirmed ? (
+                        <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                      ) : null}
                     </span>
                   ))}
                   {detections.length === 0 ? (
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[11px] font-semibold text-white/70 backdrop-blur">
                       <Crosshair className="h-3 w-3" />
-                      Watching for movement…
+                      Watching for people &amp; animals…
                     </span>
                   ) : null}
                 </div>
 
                 <span className="inline-flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white/80 backdrop-blur">
                   <Wifi className="h-3 w-3" />
-                  {uploads} frames
+                  {uploads} frames · {qualityLabel}
                 </span>
               </div>
             </>
@@ -1067,8 +1367,8 @@ export function CameraStreamView() {
               <div>
                 <p className="text-lg font-bold">Point at your field</p>
                 <p className="mt-1 text-sm text-slate-300">
-                  Start the camera, then let people or animals walk through the
-                  frame. Detections appear on the laptop in under 2 seconds.
+                  Only people and animals are tracked. Confirmed tracks raise an
+                  alarm on the dashboard in about a second.
                 </p>
               </div>
               <button
@@ -1133,9 +1433,9 @@ export function CameraStreamView() {
                 tone={uploadState === "error" ? "danger" : "default"}
               />
               <Stat
-                icon={<Activity className="h-3.5 w-3.5" />}
-                label="Motion"
-                value={`${motionPct.toFixed(1)}%`}
+                icon={<Zap className="h-3.5 w-3.5" />}
+                label="Link"
+                value={qualityLabel}
               />
               <Stat
                 icon={<MapPin className="h-3.5 w-3.5" />}
@@ -1175,8 +1475,14 @@ export function CameraStreamView() {
 
             {detections.length > 0 ? (
               <section className="space-y-2">
-                <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
-                  In view now
+                <p className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
+                  <span>In view now</span>
+                  {groqQueued ? (
+                    <span className="flex items-center gap-1 text-[10px] font-bold normal-case tracking-normal text-emerald-300">
+                      <Gauge className="h-3 w-3" />
+                      Groq check queued
+                    </span>
+                  ) : null}
                 </p>
                 <div className="space-y-1.5">
                   {detections.map((detection) => (
@@ -1190,6 +1496,15 @@ export function CameraStreamView() {
                         <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-slate-300">
                           {Math.round(detection.confidence * 100)}%
                         </span>
+                        {detection.confirmed ? (
+                          <span className="rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-300">
+                            Confirmed
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-300">
+                            Checking
+                          </span>
+                        )}
                       </span>
                       <span className="text-[11px] font-medium text-slate-400">
                         {detection.direction ?? (detection.moving ? "moving" : "still")}
@@ -1208,9 +1523,9 @@ export function CameraStreamView() {
 
             <p className="flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
-              Frames are analysed on this phone. Only a small JPEG snapshot (about
-              30–60 KB per second) and the detected labels are uploaded — no video
-              is stored.
+              Detection runs on this phone. Only humans and animals are tracked;
+              frames shrink to 320–560 px and slow automatically on 2G/data saver.
+              No video is stored.
             </p>
           </>
         ) : null}

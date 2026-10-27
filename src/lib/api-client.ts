@@ -6,8 +6,10 @@ import type {
   WeeklyReportDTO,
 } from "./types";
 import type {
+  CameraAlertDTO,
   CameraDetectionDTO,
   CameraIngestPayload,
+  CameraIngestResponse,
   CameraSessionDTO,
 } from "./camera";
 import type { PestRiskAssessment } from "./pest-risk";
@@ -167,16 +169,64 @@ export const api = {
       `/api/camera/stream/${encodeURIComponent(token)}`,
     ),
 
-  /** Uploads one frame + detections from the phone (token auth, no cookie). */
+  /**
+   * Uploads one frame + detections as multipart/form-data (token auth, no
+   * cookie). Raw JPEG avoids the ~33% base64 overhead of the JSON path.
+   */
+  postCameraFrameMultipart: async (
+    token: string,
+    meta: Omit<CameraIngestPayload, "frame">,
+    frame: Blob,
+  ): Promise<CameraIngestResponse> => {
+    const form = new FormData();
+    form.append("meta", JSON.stringify(meta));
+    form.append("frame", frame, "frame.jpg");
+
+    const response = await fetch(
+      `/api/camera/stream/${encodeURIComponent(token)}`,
+      { method: "POST", body: form },
+    );
+
+    const payload = (await response.json().catch(() => null)) as
+      | (CameraIngestResponse & { error?: string; code?: string })
+      | null;
+
+    if (!response.ok) {
+      throw new ApiError(
+        payload?.error ?? `Request failed (${response.status})`,
+        response.status,
+        payload?.code,
+      );
+    }
+
+    return payload as CameraIngestResponse;
+  },
+
+  /** Legacy JSON upload (kept for older clients / debug tools). */
   postCameraFrame: (token: string, payload: CameraIngestPayload) =>
-    request<{
-      ok: boolean;
-      sessionId: number;
-      frameUpdatedAt: string | null;
-      newDetections: unknown[];
-    }>(`/api/camera/stream/${encodeURIComponent(token)}`, {
+    request<CameraIngestResponse>(
+      `/api/camera/stream/${encodeURIComponent(token)}`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  listCameraAlerts: () =>
+    request<{ alerts: CameraAlertDTO[]; unread: number }>(
+      "/api/camera/alerts",
+    ),
+
+  acknowledgeCameraAlert: (id: number) =>
+    request<{ acknowledged: number; all: boolean }>("/api/camera/alerts", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({ id }),
+    }),
+
+  acknowledgeAllCameraAlerts: () =>
+    request<{ acknowledged: number; all: boolean }>("/api/camera/alerts", {
+      method: "POST",
+      body: JSON.stringify({ all: true }),
     }),
 
   getCameraNetwork: () =>

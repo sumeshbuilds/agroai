@@ -31,12 +31,15 @@ live field camera that recognises people and animals in near real time.
    4-point action plan (irrigation, fertilizer/spray timing, pest watch, next
    step). Falls back to a rule-based plan when the Gemini API is unavailable.
 7. **Live field camera (real, not simulated)** — `/watch` pairs a phone with a
-   QR code. The phone runs **COCO-SSD on-device** (with a motion fallback),
-   tracks each person/animal across frames, and uploads small JPEG frames plus
-   normalised boxes. The laptop shows a near-live feed with moving boxes, trails,
-   confidence, direction, a detection feed and field weather from the phone's
-   GPS. Frames are ~30–60 KB each at ~1 fps, so it works on a normal mobile data
-   connection. **The old fake `simulate` intrusion panel has been removed.**
+   QR code. The phone runs **COCO-SSD on-device** and tracks **only humans and
+   animals** (vehicles and generic motion are filtered out). A track is logged
+   once it is confirmed across several frames, and each confirmed human/animal
+   raises a **dashboard alarm** with an optional siren + browser notification.
+   The laptop shows a near-live feed with moving boxes, trails, confidence,
+   direction, a detection feed and field weather from the phone's GPS. Frames are
+   ~20–60 KB at 0.7–2.6 s intervals, so it works on a normal mobile data
+   connection. An optional Groq vision model double-checks new tracks.
+   **The old fake `simulate` intrusion panel has been removed.**
 
 ## Tech stack
 
@@ -48,6 +51,7 @@ live field camera that recognises people and animals in near real time.
 - **AI:** Google Gemini (`@google/generative-ai`)
 - **On-device vision:** TensorFlow.js (`tfjs-core`, `tfjs-converter`,
   `tfjs-backend-webgl`) + `@tensorflow-models/coco-ssd`
+- **Optional vision verifier:** Groq (`qwen/qwen3.8-27b`, OpenAI-compatible API)
 
 ## Getting started
 
@@ -65,7 +69,9 @@ npm run dev         # http://localhost:3000
 3. Allow camera + location, tap **Start camera stream**, and point the rear
    camera at the field.
 4. Walk a person or animal through the frame. The laptop shows the live box,
-   label, confidence and movement trail.
+   label, confidence and movement trail; after a moment the track is confirmed
+   and an alarm appears in the dashboard banner (tap **Siren on** to hear it).
+   Vehicles are ignored on purpose.
 
 Phone browsers expose the camera only on **HTTPS** (or `localhost`). For a local
 LAN demo use an HTTPS tunnel (`cloudflared`, `ngrok`, Vercel) or enable the
@@ -82,11 +88,15 @@ Android Chrome insecure-origin flag. Full steps:
 | `AUTH_COOKIE_SECURE` | No | Set `false` only for local `next start` tests over http. |
 | `GEMINI_API_KEY` | No | Enables Gemini advisories; otherwise a rule-based fallback is used. |
 | `GEMINI_MODEL` | No | Overrides the model (default `gemini-3.8-flash`). |
+| `GROQ_API_KEY` | No | Enables the Groq vision verifier for new human/animal tracks. |
+| `GROQ_VISION_MODEL` | No | Overrides the verifier model (default `qwen/qwen3.8-27b`). |
+| `GROQ_TIMEOUT_MS` | No | Verifier timeout in ms (default `4500`, max `15000`). |
 | `CRON_SECRET` | No | Protects `/api/cron/weekly-report`. |
 
 Weather, satellite imagery and the on-device detector need no API keys. The
 detector downloads its ~6 MB COCO-SSD weights from Google Storage the first time
-a camera starts, then the browser caches them.
+a camera starts, then the browser caches them. Without `GROQ_API_KEY` the
+on-device labels are used as-is and no frame leaves your server.
 
 ## Scripts
 
@@ -113,7 +123,7 @@ src/
 │  ├─ layout.tsx, manifest.ts, not-found.tsx, globals.css
 ├─ components/               # auth, map, weather, crops, camera, watch, dashboard, ui
 ├─ db/                       # Drizzle schema + lazy client
-└─ lib/                      # auth, camera, crop-guide, pest-risk, geo, weather, gemini, queries
+└─ lib/                      # auth, camera, camera-queries, groq, alarm, crop-guide, pest-risk, geo, weather, gemini, queries
 drizzle/                     # generated SQL migrations
 ```
 
@@ -127,7 +137,8 @@ drizzle/                     # generated SQL migrations
 | `GET` / `POST` | `/api/camera/sessions` | List camera sessions / create a pairing token. |
 | `GET` / `PATCH` / `DELETE` | `/api/camera/sessions/:id` | Session detail, stop/restart, delete. |
 | `GET` | `/api/camera/sessions/:id/frame` | Latest JPEG (auth cookie). |
-| `GET` / `POST` | `/api/camera/stream/:token` | Public token-scoped pairing + frame ingest. |
+| `GET` / `POST` | `/api/camera/stream/:token` | Public token-scoped pairing + frame ingest (multipart or JSON). |
+| `GET` / `POST` | `/api/camera/alerts` | Unread human/animal alarms (`?all=1` for history); acknowledge one or all. |
 | `GET` | `/api/camera/network` | LAN IPv4 addresses for the phone QR link. |
 | `GET` | `/api/reports` | List weekly reports. |
 | `GET` / `POST` | `/api/cron/weekly-report` | Generate weekly advisories. |
@@ -137,8 +148,11 @@ drizzle/                     # generated SQL migrations
 - Built with Next.js **Cache Components** enabled; data-touching GET handlers are
   intentionally dynamic.
 - The phone analyses frames locally. Only a downscaled JPEG + detection metadata
-  is uploaded; the server stores the newest frame per session and one row per new
-  tracked object. Raw video never leaves the phone.
+  is uploaded (multipart, no base64 overhead); the server stores the newest frame
+  per session and one row per new **confirmed** human/animal track. Raw video
+  never leaves the phone.
+- Alarms live in `camera_alerts` and are polled by the dashboard banner (4 s on
+  `/watch`, 6 s on the dashboard). One alarm per camera at most every 8 s.
 - Notifications use the browser `Notification` API (no service worker), so they
   appear while the app is open.
 

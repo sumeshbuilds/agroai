@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { LiveWatchCard } from "@/components/watch/LiveWatchCard";
+import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 import { WeatherCard } from "@/components/weather/WeatherCard";
 import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
@@ -267,6 +268,8 @@ export function DashboardView() {
           </div>
         ) : null}
       </header>
+
+      <CameraAlarmBanner className="mb-4" intervalMs={6_000} />
 
       {needsSetup || notice ? (
         <div className="space-y-3 pb-4">

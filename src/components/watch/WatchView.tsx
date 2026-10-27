@@ -28,7 +28,6 @@ import {
   Smartphone,
   Sparkles,
   Trash2,
-  TriangleAlert,
   Users,
   Video,
   WifiOff,
@@ -38,6 +37,7 @@ import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 import { ApiError, api } from "@/lib/api-client";
 import {
   CATEGORY_STYLES,
@@ -56,13 +56,27 @@ interface SessionDetail {
   detections: CameraDetectionDTO[];
 }
 
-const POLL_MS = 900;
+const POLL_MS_NORMAL = 1_000;
+const POLL_MS_SLOW = 2_500;
 
 export function WatchView() {
   const origin = useClientValue(() => window.location.origin, "");
   const hostname = useClientValue(() => window.location.hostname, "");
   const protocol = useClientValue(() => window.location.protocol, "http:");
   const port = useClientValue(() => window.location.port, "");
+  // Slow links (2G / data saver) poll less often to keep the feed usable.
+  const pollMs = useClientValue(() => {
+    const connection = (
+      navigator as Navigator & {
+        connection?: { saveData?: boolean; effectiveType?: string };
+      }
+    ).connection;
+    return connection?.saveData ||
+      connection?.effectiveType === "2g" ||
+      connection?.effectiveType === "slow-2g"
+      ? POLL_MS_SLOW
+      : POLL_MS_NORMAL;
+  }, POLL_MS_NORMAL);
 
   const [sessions, setSessions] = useState<CameraSessionDTO[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -177,12 +191,12 @@ export function WatchView() {
   useEffect(() => {
     if (selectedId === null) return;
     const kickoff = window.setTimeout(() => void loadDetail(selectedId), 0);
-    const timer = window.setInterval(() => void loadDetail(selectedId, true), POLL_MS);
+    const timer = window.setInterval(() => void loadDetail(selectedId, true), pollMs);
     return () => {
       window.clearTimeout(kickoff);
       window.clearInterval(timer);
     };
-  }, [selectedId, loadDetail]);
+  }, [selectedId, loadDetail, pollMs]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -342,7 +356,6 @@ export function WatchView() {
         )
       : null;
 
-  const newestEvent = activeDetail?.detections[0] ?? null;
   const liveChipLabel = selectedSession?.isLive
     ? "Live camera"
     : selectedSession?.status === "live"
@@ -350,14 +363,6 @@ export function WatchView() {
       : selectedSession?.status === "ended"
         ? "Stream ended"
         : "No live camera";
-  const newestAlert =
-    newestEvent &&
-    newestEvent.category !== "motion" &&
-    newestEvent.createdAt &&
-    clock > 0 &&
-    clock - new Date(newestEvent.createdAt).getTime() < 30_000
-      ? newestEvent
-      : null;
 
   return (
     <div className="w-full px-4 pb-6 pt-4 sm:px-6">
@@ -415,6 +420,8 @@ export function WatchView() {
       {notice ? <Callout tone="success" className="mb-3">{notice}</Callout> : null}
       {error ? <Callout tone="danger" className="mb-3">{error}</Callout> : null}
 
+      <CameraAlarmBanner className="mb-4" intervalMs={4_000} />
+
       {sessionsLoading && sessions.length === 0 ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
           <div className="card h-[460px] animate-pulse-soft" />
@@ -467,27 +474,6 @@ export function WatchView() {
             <div className="space-y-4">
               {detailError ? <Callout tone="danger">{detailError}</Callout> : null}
 
-              {newestAlert ? (
-                <div className="animate-rise flex items-center gap-3 rounded-xl border border-danger-500/40 bg-danger-500/10 px-4 py-3 text-sm text-danger-700 dark:text-red-300">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-danger-500/15 text-lg">
-                    {newestAlert.emoji}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-bold">
-                      {newestAlert.label} detected ·{" "}
-                      {newestAlert.confidence
-                        ? `${Math.round(newestAlert.confidence * 100)}% confidence`
-                        : "live detection"}
-                    </p>
-                    <p className="text-xs opacity-80">
-                      {formatRelative(newestAlert.createdAt)} ·{" "}
-                      {selectedSession?.name ?? "field camera"}
-                    </p>
-                  </div>
-                  <TriangleAlert className="h-5 w-5 shrink-0" />
-                </div>
-              ) : null}
-
               <LivePlayer
                 session={selectedSession}
                 detections={liveDetections}
@@ -533,7 +519,7 @@ export function WatchView() {
                       Detection feed
                     </h2>
                     <p className="muted text-xs">
-                      New person, animal and vehicle tracks from the live camera
+                      Confirmed human and animal tracks from the live camera
                     </p>
                   </div>
                   <span className="chip chip-brand">
@@ -579,17 +565,22 @@ export function WatchView() {
                               {formatRelative(detection.createdAt)}
                             </p>
                           </div>
-                          {detection.category === "person" ? (
-                            <span className="chip chip-warn">Human</span>
-                          ) : detection.category === "animal" ? (
-                            <span className="chip chip-danger">Animal</span>
-                          ) : detection.category === "vehicle" ? (
-                            <span className="chip chip-info">Vehicle</span>
-                          ) : (
-                            <span className="chip bg-[var(--card-muted)] text-[var(--muted)]">
-                              Motion
-                            </span>
-                          )}
+                          <div className="flex shrink-0 flex-col items-end gap-1">
+                            {detection.category === "person" ? (
+                              <span className="chip chip-warn">Human</span>
+                            ) : (
+                              <span className="chip chip-danger">Animal</span>
+                            )}
+                            {detection.verified ? (
+                              <span
+                                className="chip chip-brand"
+                                title="Confirmed by Groq vision"
+                              >
+                                <Sparkles className="h-3 w-3" />
+                                AI
+                              </span>
+                            ) : null}
+                          </div>
                         </li>
                       );
                     })}
@@ -793,7 +784,11 @@ export function WatchView() {
                   <ContextRow
                     icon={<Bot className="h-3.5 w-3.5" />}
                     label="Detector"
-                    value={selectedSession?.aiEnabled ? "COCO-SSD" : "Motion fallback"}
+                    value={
+                      selectedSession?.aiEnabled
+                        ? "On-device + Groq"
+                        : "Motion assist"
+                    }
                   />
                 </div>
 
