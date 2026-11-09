@@ -108,10 +108,10 @@ export function WeatherCard({
 
   return (
     <section className="card overflow-hidden">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:px-5">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] p-5 sm:px-6">
         <div>
-          <h2 className="text-base font-semibold">Weather</h2>
-          <p className="muted mt-0.5 text-xs">
+          <h2 className="text-lg font-semibold">Sky over your field</h2>
+          <p className="muted mt-1 text-xs leading-relaxed">
             {farmName ? `${farmName} · ` : ""}
             <span className="tabular-nums">
               {weather.latitude.toFixed(3)}, {weather.longitude.toFixed(3)}
@@ -128,18 +128,14 @@ export function WeatherCard({
         </span>
       </header>
 
-      <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
-        <div className="relative flex items-center gap-3 overflow-hidden rounded-xl bg-brand-700 p-4 text-white sm:col-span-2 xl:col-span-1">
-          <span
-            aria-hidden
-            className="pointer-events-none absolute -right-5 -top-6 h-24 w-24 rounded-full bg-white/10"
-          />
-          <Thermometer className="h-8 w-8 shrink-0 opacity-90" strokeWidth={1.8} />
+      <div className="grid gap-5 p-5 sm:grid-cols-2 sm:px-6 xl:grid-cols-4">
+        <div className="flex items-center gap-3 rounded-xl bg-leaf-100 p-4 sm:col-span-2 xl:col-span-1">
+          <Thermometer aria-hidden className="h-7 w-7 shrink-0 text-leaf-700" strokeWidth={1.8} />
           <div>
             <p className="text-4xl font-semibold leading-none tabular-nums tracking-tight">
               {currentTemp === null ? "--" : `${Math.round(currentTemp)}°`}
             </p>
-            <p className="mt-1 text-xs font-medium text-white/85">
+            <p className="muted mt-2 text-xs">
               Now · {days[0]?.date ? shortDate(days[0].date) : ""}
             </p>
           </div>
@@ -187,7 +183,7 @@ export function WeatherCard({
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2 border-t border-[var(--border)] bg-[var(--card-muted)]/40 p-4 sm:grid-cols-4 sm:p-5 2xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-4 border-t border-[var(--border)] bg-[var(--card-muted)]/40 p-5 sm:grid-cols-4 sm:px-6 2xl:grid-cols-7">
         {days.map((day, index) => {
           const Icon = weatherIconFor(day);
           const left = ((day.tempMin - globalMin) / spread) * 100;
@@ -199,33 +195,33 @@ export function WeatherCard({
           return (
             <div
               key={day.date}
-              className="card-muted flex flex-col items-center gap-1.5 p-3"
+               className="flex flex-col items-center gap-2 p-2"
             >
               <p className="text-xs font-semibold">
                 {weekdayLabel(day.date, index)}
               </p>
               <Icon
-                className="h-6 w-6 text-brand-700 dark:text-brand-400"
+                className="h-6 w-6 text-sky-500"
                 strokeWidth={1.9}
               />
               <p className="text-sm font-semibold tabular-nums">
                 {Math.round(day.tempMax)}°
-                <span className="muted font-normal">
+                <span className="muted font-semibold">
                   {" "}
                   / {Math.round(day.tempMin)}°
                 </span>
               </p>
-              <div className="h-1.5 w-full rounded-full bg-black/10 dark:bg-white/10">
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-paper-deep">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-sky-500 to-warn-500"
+                  className="h-full rounded-full bg-info-400"
                   style={{ marginLeft: `${left}%`, width: `${width}%` }}
                 />
               </div>
-              <p className="flex items-center gap-0.5 text-[11px] font-semibold tabular-nums text-sky-600 dark:text-sky-400">
+              <p className="flex items-center gap-1 text-xs font-medium tabular-nums text-info-700">
                 <Droplets className="h-3 w-3" />
                 {day.precipitationProbability}%
               </p>
-              <p className="muted text-[11px] tabular-nums">
+              <p className="muted text-xs tabular-nums">
                 {Math.round(day.windSpeedMax)} km/h
               </p>
             </div>
@@ -248,17 +244,15 @@ function Stat({
   hint?: string;
 }) {
   return (
-    <div className="card-muted flex items-center gap-3 p-4">
+    <div className="flex items-center gap-3 px-1 py-3">
       {icon}
       <div className="min-w-0">
-        <p className="muted text-[11px] font-semibold uppercase tracking-[0.08em]">
-          {label}
-        </p>
+        <p className="muted text-sm font-medium">{label}</p>
         <p className="text-lg font-semibold leading-tight tabular-nums">
           {value}
         </p>
         {hint ? (
-          <p className="muted mt-0.5 text-[11px] font-normal leading-snug">
+          <p className="muted mt-1 text-xs leading-relaxed">
             {hint}
           </p>
         ) : null}
@@ -269,16 +263,17 @@ function Stat({
 
 function WeatherCardSkeleton() {
   return (
-    <section className="card overflow-hidden">
+    <section role="status" className="card overflow-hidden">
+      <span className="sr-only">Loading field weather…</span>
       <div className="flex items-center justify-between border-b border-[var(--border)] px-4 py-3 sm:px-5">
-        <div className="h-5 w-28 animate-pulse-soft rounded bg-black/10 dark:bg-white/10" />
-        <div className="h-6 w-24 animate-pulse-soft rounded-full bg-black/10 dark:bg-white/10" />
+        <div className="h-5 w-28 animate-pulse-soft rounded bg-paper-deep" />
+        <div className="h-6 w-24 animate-pulse-soft rounded-full bg-paper-deep" />
       </div>
       <div className="grid gap-3 p-4 sm:grid-cols-2 sm:p-5 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <div
             key={index}
-            className="h-20 animate-pulse-soft rounded-xl bg-black/5 dark:bg-white/5"
+            className="h-20 animate-pulse-soft rounded-2xl bg-paper-deep"
           />
         ))}
       </div>
@@ -286,7 +281,7 @@ function WeatherCardSkeleton() {
         {Array.from({ length: 7 }).map((_, index) => (
           <div
             key={index}
-            className="h-32 animate-pulse-soft rounded-xl bg-black/5 dark:bg-white/5"
+            className="h-32 animate-pulse-soft rounded-2xl bg-paper-deep"
           />
         ))}
       </div>

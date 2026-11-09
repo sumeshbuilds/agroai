@@ -17,6 +17,8 @@ export interface HourlySoilMoisture {
 export interface CurrentWeather {
   time: string | null;
   temperature: number | null;
+  /** Relative humidity at 2 m (%). */
+  humidity: number | null;
   precipitation: number | null;
   windSpeed: number | null;
   soilMoisture: number | null;
@@ -82,7 +84,8 @@ export async function fetchWeather(
   const params = new URLSearchParams({
     latitude: latitude.toFixed(5),
     longitude: longitude.toFixed(5),
-    current: "temperature_2m,precipitation,wind_speed_10m",
+    current:
+      "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
     hourly: "soil_moisture_0_to_1cm",
     daily:
       "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max",
@@ -140,6 +143,7 @@ export async function fetchWeather(
     current: {
       time: typeof payload.current?.time === "string" ? payload.current.time : null,
       temperature: num(payload.current?.temperature_2m),
+      humidity: num(payload.current?.relative_humidity_2m),
       precipitation: num(payload.current?.precipitation),
       windSpeed: num(payload.current?.wind_speed_10m),
       soilMoisture: currentSoilMoisture,

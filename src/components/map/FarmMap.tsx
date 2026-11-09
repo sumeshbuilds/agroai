@@ -6,17 +6,19 @@ import { useEffect, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { Map as LeafletMap } from "leaflet";
 import Link from "next/link";
-import { CircleMarker, MapContainer, Polygon, TileLayer, Tooltip } from "react-leaflet";
+import { CircleMarker, Polygon, ScaleControl, TileLayer, Tooltip, useMap } from "react-leaflet";
 import {
   Crosshair,
   ExternalLink,
   Layers,
   Map as MapIcon,
-  RefreshCw,
-  Ruler,
+  Minus,
+  Plus,
+  Satellite,
   Video,
 } from "lucide-react";
 
+import { LeafletMapContainer } from "@/components/map/LeafletMapContainer";
 import type { CameraSessionDTO } from "@/lib/camera";
 import { cn } from "@/lib/cn";
 import { formatLandArea } from "@/lib/format";
@@ -28,25 +30,58 @@ interface FarmMapProps {
   selectedFarm?: FarmDTO | null;
   cameras?: CameraSessionDTO[];
   onSelectFarm?: (farmId: number) => void;
-  onRefresh?: () => void;
-  refreshing?: boolean;
+  detailsOpen?: boolean;
   className?: string;
 }
 
+/** Field index label rendered inside the polygon ("Area 1"). */
+function FarmLabel({ farm }: { farm: FarmDTO }) {
+  return (
+    <span className="block text-center leading-tight text-white [text-shadow:0_1px_8px_rgba(20,20,10,0.65)]">
+      <span className="block text-[0.78rem] font-semibold">
+        {farm.name}
+      </span>
+      <span className="mt-1 block text-[0.6875rem] font-medium opacity-90">
+        {formatLandArea(farm.areaAcres)}
+      </span>
+    </span>
+  );
+}
+
+function FarmMapFocus({ center: [lat, lng] }: { center: GeoPoint }) {
+  const map = useMap();
+
+  // Use the current map's context: it may be recreated after navigation.
+  useEffect(() => {
+    if (map.getCenter().equals([lat, lng]) && map.getZoom() === FARM_ZOOM) return;
+    map.setView([lat, lng], FARM_ZOOM, { animate: false });
+  }, [map, lat, lng]);
+
+  return null;
+}
+
 /**
- * Map control rendered in the overlay (outside `<MapContainer>`), so it talks
- * to the map through a ref rather than Leaflet's React context.
+ * Map control rendered outside `<MapContainer>`, talking to the map through a
+ * ref (Leaflet's React context doesn't reach overlay slots).
  */
-function LocateMe({ mapRef }: { mapRef: RefObject<LeafletMap | null> }) {
-  const [error, setError] = useState<string | null>(null);
+function MapControls({
+  mapRef,
+}: {
+  mapRef: RefObject<LeafletMap | null>;
+}) {
+  const [locateError, setLocateError] = useState<string | null>(null);
+
+  const zoom = (delta: number) => mapRef.current?.setZoom(
+    mapRef.current.getZoom() + delta,
+    { animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches },
+  );
 
   const handleLocate = () => {
     if (!("geolocation" in navigator)) {
-      setError("Your browser does not support location access.");
+      setLocateError("Location not supported");
       return;
     }
-
-    setError(null);
+    setLocateError(null);
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const map = mapRef.current;
@@ -54,34 +89,61 @@ function LocateMe({ mapRef }: { mapRef: RefObject<LeafletMap | null> }) {
         map.flyTo(
           [position.coords.latitude, position.coords.longitude],
           Math.max(map.getZoom(), 16),
-          { duration: 1.2 },
+          {
+            animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+            duration: 0.25,
+          },
         );
       },
-      () =>
-        setError(
-          "Could not read your location. Please allow location access in your browser.",
-        ),
+      () => setLocateError("Location permission needed"),
       { enableHighAccuracy: true, timeout: 10_000 },
     );
   };
 
+  const controlClass =
+    "icon-btn border-transparent bg-transparent";
+
   return (
-    <div className="flex flex-col items-end gap-1">
-      <button
-        type="button"
-        onClick={handleLocate}
-        className="flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur transition-colors hover:bg-white sm:px-3"
-        title="Move the map to your current location"
-        aria-label="Move the map to my current location"
-      >
-        <Crosshair className="h-3.5 w-3.5" />
-        <span className="hidden sm:inline">Locate me</span>
-      </button>
-      {error ? (
-        <span className="max-w-48 rounded-lg bg-danger-100 px-2 py-1 text-center text-[10px] font-semibold text-danger-700">
-          {error}
+    <div className="absolute left-3 top-3 z-[500] flex flex-col items-start gap-2 sm:left-4 sm:top-4">
+      {locateError ? (
+        <span role="status" className="map-chip map-hint max-w-[10rem] rounded-lg text-xs text-danger-700">
+          {locateError}
         </span>
       ) : null}
+      <div className="map-panel flex flex-col rounded-xl p-1">
+        <button
+          type="button"
+          onClick={() => zoom(1)}
+          aria-label="Zoom in"
+          className={controlClass}
+        >
+          <Plus className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => zoom(-1)}
+          aria-label="Zoom out"
+          className={cn(controlClass, "my-0.5 rounded-lg")}
+        >
+          <Minus className="h-4 w-4" />
+        </button>
+        <button
+          type="button"
+          onClick={handleLocate}
+          aria-label="Move map to my location"
+          className={controlClass}
+        >
+          <Crosshair className="h-4 w-4" />
+        </button>
+      </div>
+      <a
+        href="/watch"
+        className="map-panel icon-btn border-transparent"
+        aria-label="Open live camera watch"
+        title="Live camera watch"
+      >
+        <Video className="h-4 w-4" />
+      </a>
     </div>
   );
 }
@@ -89,46 +151,36 @@ function LocateMe({ mapRef }: { mapRef: RefObject<LeafletMap | null> }) {
 function EmptyFarmMap() {
   return (
     <div className="card flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
-      <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--card-muted)] text-[var(--color-ink)]">
         <MapIcon className="h-6 w-6" />
       </span>
-      <p className="text-sm font-bold">No farm mapped yet</p>
-      <p className="muted max-w-xs text-xs">
+      <p className="text-sm font-semibold">No fields mapped yet</p>
+      <p className="muted max-w-xs text-xs leading-relaxed">
         Draw your field boundary on the satellite map — its centre powers your
         weather and alerts.
       </p>
       <Link href="/map" className="btn btn-primary">
         <MapIcon className="h-4 w-4" />
-        Draw your farm
+        Map your first field
       </Link>
     </div>
   );
 }
 
 /**
- * Read-only dashboard map for the sketched layout: a tall satellite panel on
- * the left showing the selected farmland, its centre marker and any live
- * phone-camera positions. Boundary drawing stays on /map.
+ * Read-only operations map: satellite basemap, the operator's field polygons,
+ * live phone-camera positions and floating map controls. Boundary drawing
+ * stays on /map.
  */
 export function FarmMap({
   farms,
   selectedFarm = null,
   cameras = [],
   onSelectFarm,
-  onRefresh,
-  refreshing = false,
+  detailsOpen = false,
   className,
 }: FarmMapProps) {
   const mapRef = useRef<LeafletMap | null>(null);
-
-  const lat = selectedFarm?.centroidLat;
-  const lng = selectedFarm?.centroidLng;
-
-  // Fly to the newly selected farm (leaflet ignores `center` prop updates).
-  useEffect(() => {
-    if (lat === undefined || lng === undefined) return;
-    mapRef.current?.flyTo([lat, lng], FARM_ZOOM, { duration: 0.8 });
-  }, [lat, lng]);
 
   if (!selectedFarm) {
     return <EmptyFarmMap />;
@@ -139,11 +191,11 @@ export function FarmMap({
   return (
     <div
       className={cn(
-        "relative h-full overflow-hidden rounded-2xl border border-[var(--border)]",
+        "relative h-full overflow-hidden rounded-2xl border border-[var(--color-line)]",
         className,
       )}
     >
-      <MapContainer
+      <LeafletMapContainer
         ref={mapRef}
         center={center}
         zoom={FARM_ZOOM}
@@ -151,21 +203,47 @@ export function FarmMap({
         zoomControl={false}
         className="h-full w-full"
       >
+        <FarmMapFocus center={center} />
+        <ScaleControl imperial={false} position="bottomleft" />
         <TileLayer
           url={ESRI_WORLD_IMAGERY_URL}
           attribution={ESRI_ATTRIBUTION}
           maxZoom={19}
         />
 
-        <Polygon
-          positions={selectedFarm.points}
-          pathOptions={{
-            color: "#34d399",
-            weight: 3,
-            fillColor: "#34d399",
-            fillOpacity: 0.12,
-          }}
-        />
+        {farms.map((farm, index) => {
+          const selected = farm.id === selectedFarm.id;
+          return (
+            <Polygon
+              key={farm.id}
+              positions={farm.points}
+              eventHandlers={{
+                click: () => onSelectFarm?.(farm.id),
+              }}
+              pathOptions={{
+                color: selected ? "#ffffff" : "#e2ae8f",
+                weight: selected ? 3 : 2,
+                fillColor: selected ? "#638650" : "#b6532e",
+                fillOpacity: selected ? 0.32 : 0.16,
+              }}
+            >
+              <Tooltip
+                permanent={selected}
+                direction="center"
+                offset={[0, 0]}
+                className="field-label"
+              >
+                {selected ? (
+                  <FarmLabel farm={farm} />
+                ) : (
+                  <span className="text-[0.66rem] font-semibold text-accent-700">
+                    Area {index + 1} · {farm.name}
+                  </span>
+                )}
+              </Tooltip>
+            </Polygon>
+          );
+        })}
 
         {cameras
           .filter((camera) => camera.lat !== null && camera.lng !== null)
@@ -173,89 +251,43 @@ export function FarmMap({
             <CircleMarker
               key={`camera-${camera.id}`}
               center={[camera.lat!, camera.lng!]}
-              radius={camera.isLive ? 10 : 7}
+              radius={camera.isLive ? 7 : 5.5}
               pathOptions={{
                 color: "#ffffff",
-                weight: 2,
-                fillColor: camera.isLive ? "#0ea5e9" : "#64748b",
+                weight: 2.5,
+                fillColor: camera.isLive ? "#bf4540" : "#606b60",
                 fillOpacity: 0.95,
               }}
             >
               <Tooltip>
-                📷 {camera.name} · {camera.isLive ? "LIVE" : camera.status}
+                {camera.name} · {camera.isLive ? "LIVE" : camera.status}
               </Tooltip>
             </CircleMarker>
           ))}
+      </LeafletMapContainer>
 
-        <CircleMarker
-          center={center}
-          radius={6}
-          pathOptions={{
-            color: "#ffffff",
-            weight: 2,
-            fillColor: "#ef4444",
-            fillOpacity: 1,
-          }}
-        >
-          <Tooltip permanent direction="top" offset={[0, -6]}>
-            Farm centre
-          </Tooltip>
-        </CircleMarker>
-      </MapContainer>
+      <MapControls mapRef={mapRef} />
 
-      {farms.length > 1 ? (
-        <select
-          aria-label="Active farm"
-          className="select absolute left-3 top-3 z-[500] w-56! min-h-9! rounded-full bg-white/95 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur"
-          value={selectedFarm.id}
-          onChange={(event) => onSelectFarm?.(Number(event.target.value))}
-        >
-          {farms.map((farm) => (
-            <option key={farm.id} value={farm.id}>
-              {farm.name}
-            </option>
-          ))}
-        </select>
-      ) : null}
-
-      <div className="absolute bottom-3 left-3 z-[500] flex flex-wrap items-center gap-2">
-        <span className="chip bg-white/95 text-slate-900 backdrop-blur">
-          <Ruler className="h-3 w-3" />
-          {formatLandArea(selectedFarm.areaAcres)}
-        </span>
-        <span className="chip bg-white/95 text-slate-900 backdrop-blur">
-          <Layers className="h-3 w-3" />
+      <div className={cn(
+        "absolute bottom-7 left-3 right-3 z-[500] flex flex-wrap items-center gap-2 sm:left-4 sm:right-4",
+        detailsOpen && "xl:right-[23.5rem]",
+      )}>
+        <span className="map-chip">
+          <Satellite className="h-3 w-3" />
           Esri satellite
         </span>
-        <button
-          type="button"
-          onClick={onRefresh}
-          disabled={refreshing}
-          className="flex items-center gap-1.5 rounded-full bg-white/90 px-3 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur transition-colors hover:bg-white disabled:opacity-60"
-        >
-          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
-      </div>
-
-      <div className="absolute right-3 top-3 z-[500] flex flex-col items-end gap-2">
+        <span className="map-chip">
+          <Layers className="h-3 w-3" />
+          {formatLandArea(selectedFarm.areaAcres)}
+        </span>
         <Link
           href="/map"
-          aria-label="Draw or edit the farm boundary"
-          className="flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur transition-colors hover:bg-white sm:px-3"
+          className="toolbar-btn min-h-11 border-transparent text-xs shadow-[var(--shadow-card)]"
+          title="Draw or edit the field boundary"
         >
-          <ExternalLink className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Draw / edit boundary</span>
+          <ExternalLink className="h-3 w-3" />
+          Edit boundary
         </Link>
-        <Link
-          href="/watch"
-          aria-label="Open live camera watch"
-          className="flex items-center gap-1.5 rounded-full bg-white/90 px-2.5 py-1.5 text-xs font-bold text-slate-900 shadow-md backdrop-blur transition-colors hover:bg-white sm:px-3"
-        >
-          <Video className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Live watch</span>
-        </Link>
-        <LocateMe mapRef={mapRef} />
       </div>
     </div>
   );

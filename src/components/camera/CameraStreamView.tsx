@@ -19,7 +19,6 @@ import {
   FlipHorizontal,
   Flashlight,
   Gauge,
-  Loader2,
   MapPin,
   Radio,
   ScanEye,
@@ -32,6 +31,7 @@ import {
 } from "lucide-react";
 
 import { ApiError, api } from "@/lib/api-client";
+import { Button } from "@/components/ui/Button";
 import {
   CATEGORY_COLORS,
   clamp01,
@@ -1024,6 +1024,7 @@ export function CameraStreamView() {
     if (!started) return;
     let raf = 0;
     let lastDraw = 0;
+    const fontFamily = getComputedStyle(document.body).fontFamily;
 
     const draw = (time: number) => {
       raf = window.requestAnimationFrame(draw);
@@ -1085,27 +1086,27 @@ export function CameraStreamView() {
         const label = `${meta.emoji} ${meta.label} ${Math.round(
           track.confidence * 100,
         )}%${track.confirmed ? " ✓" : ""}`;
-        context.font = `600 ${12 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+        context.font = `600 ${12 * dpr}px ${fontFamily}`;
         const textWidth = context.measureText(label).width;
         const labelHeight = 22 * dpr;
         const labelY = Math.max(0, py - labelHeight);
 
         context.fillStyle = color;
         context.fillRect(px, labelY, textWidth + 14 * dpr, labelHeight);
-        context.fillStyle = "#0b120d";
+        context.fillStyle = "#101c15";
         context.fillText(label, px + 7 * dpr, labelY + 15 * dpr);
 
         if (track.direction) {
-          context.font = `500 ${10 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+          context.font = `500 ${10 * dpr}px ${fontFamily}`;
           const directionWidth = context.measureText(track.direction).width;
-          context.fillStyle = "rgba(2, 6, 23, 0.72)";
+          context.fillStyle = "rgba(16, 28, 21, 0.85)";
           context.fillRect(
             px,
             py + ph + 4 * dpr,
             directionWidth + 12 * dpr,
             17 * dpr,
           );
-          context.fillStyle = "#f8fafc";
+          context.fillStyle = "#f2f5ed";
           context.fillText(
             track.direction,
             px + 6 * dpr,
@@ -1146,7 +1147,7 @@ export function CameraStreamView() {
     if (aiState === "ready") {
       return {
         label: verifiedCount > 0 ? "AI verified" : "AI ready",
-        tone: "bg-emerald-400/15 text-emerald-300 border-emerald-400/30",
+        tone: "bg-leaf-300/15 text-leaf-300 border-leaf-300/30",
       };
     }
     if (aiState === "loading") {
@@ -1176,18 +1177,18 @@ export function CameraStreamView() {
       : "Auto";
 
   return (
-    <main className="min-h-dvh bg-slate-950 text-slate-100">
+    <main className="camera-surface min-h-dvh bg-slate-950 text-slate-100">
       <header className="sticky top-0 z-20 border-b border-white/10 bg-slate-950/90 backdrop-blur">
-        <div className="mx-auto flex max-w-xl items-center justify-between gap-3 px-4 py-3">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-slate-950">
+        <div className="mx-auto flex max-w-xl items-center justify-between gap-3 px-4 py-4">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
+            <span className="brand-mark h-10 w-10">
               <ScanEye className="h-5 w-5" strokeWidth={2.4} />
             </span>
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold">
+              <h1 className="truncate text-base font-semibold">
                 {pairing?.session.name ?? "AgroAI field camera"}
-              </p>
-              <p className="truncate text-[11px] text-slate-400">
+              </h1>
+              <p className="mt-0.5 truncate text-xs text-slate-400">
                 {pairing?.farmerName ?? "Pairing phone camera…"}
               </p>
             </div>
@@ -1203,7 +1204,7 @@ export function CameraStreamView() {
             <span
               className={
                 started
-                  ? "h-1.5 w-1.5 animate-pulse rounded-full bg-red-400"
+                  ? "h-1.5 w-1.5 animate-pulse-soft rounded-full bg-red-400"
                   : "h-1.5 w-1.5 rounded-full bg-slate-500"
               }
             />
@@ -1212,7 +1213,7 @@ export function CameraStreamView() {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-xl space-y-4 px-3 pb-10 pt-3 sm:px-4">
+      <div className="mx-auto w-full max-w-xl space-y-5 px-4 pb-[calc(2rem+env(safe-area-inset-bottom))] pt-5">
         {linkError ? (
           <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
             <p className="flex items-center gap-2 font-bold">
@@ -1273,7 +1274,7 @@ export function CameraStreamView() {
         ) : null}
 
         {phoneAlert ? (
-          <div className="animate-rise flex items-center gap-3 rounded-2xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-sm text-red-100">
+          <div role="alert" className="flex items-center gap-3 rounded-xl border border-red-400/40 bg-red-500/15 px-4 py-3 text-sm text-red-100">
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-red-500/20 text-xl">
               {phoneAlert.emoji}
             </span>
@@ -1295,8 +1296,8 @@ export function CameraStreamView() {
         <div
           className={
             started
-              ? "relative overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl"
-              : "relative aspect-[3/4] overflow-hidden rounded-3xl border border-white/10 bg-black shadow-2xl"
+              ? "relative overflow-hidden rounded-2xl bg-slate-900"
+              : "relative aspect-[4/5] overflow-hidden rounded-2xl bg-slate-900 sm:aspect-square"
           }
         >
           <video
@@ -1305,6 +1306,7 @@ export function CameraStreamView() {
             autoPlay
             muted
             playsInline
+            aria-label="Live preview from this phone camera"
           />
           <canvas
             ref={overlayRef}
@@ -1315,7 +1317,7 @@ export function CameraStreamView() {
             <>
               <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/90 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-white" />
+                  <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-white" />
                   Live
                 </span>
                 <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold backdrop-blur ${aiBadge.tone}`}>
@@ -1360,26 +1362,26 @@ export function CameraStreamView() {
               </div>
             </>
           ) : (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-slate-950/70 via-slate-950/40 to-slate-950/80 px-6 text-center">
-              <span className="flex h-16 w-16 items-center justify-center rounded-full border border-emerald-400/40 bg-emerald-400/15 text-emerald-300">
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-5 px-6 py-8 text-center">
+              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-slate-800 text-leaf-300">
                 <Camera className="h-7 w-7" />
               </span>
               <div>
-                <p className="text-lg font-bold">Point at your field</p>
-                <p className="mt-1 text-sm text-slate-300">
+                <h2 className="text-xl font-semibold">Point at your field</h2>
+                <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-slate-300">
                   Only people and animals are tracked. Confirmed tracks raise an
                   alarm on the dashboard in about a second.
                 </p>
               </div>
-              <button
-                type="button"
+              <Button
                 onClick={() => void startCamera("environment")}
-                disabled={starting || !pairing || isEnded || !secure || !hasMedia}
-                className="btn btn-primary min-h-12! px-6! text-base!"
+                loading={starting}
+                disabled={!pairing || isEnded || !secure || !hasMedia}
+                className="min-h-12 px-5 text-sm"
               >
-                {starting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Camera className="h-5 w-5" />}
+                <Camera aria-hidden className="h-4 w-4" />
                 {starting ? "Opening camera…" : "Start camera stream"}
-              </button>
+              </Button>
               {pairingBusy ? (
                 <p className="text-[11px] text-slate-400">Checking camera link…</p>
               ) : null}
@@ -1388,9 +1390,16 @@ export function CameraStreamView() {
         </div>
 
         {cameraError ? (
-          <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-3.5 text-sm text-red-200">
-            <TriangleAlert className="mr-1.5 inline h-4 w-4" />
-            {cameraError}
+          <div role="alert" className="rounded-xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
+            <p className="flex items-center gap-2 font-semibold">
+              <TriangleAlert aria-hidden className="h-4 w-4 shrink-0" />
+              Could not start the camera
+            </p>
+            <p className="mt-2 leading-relaxed">{cameraError}</p>
+            <p className="mt-2 text-xs leading-relaxed">
+              Check camera access in your browser settings, then try starting
+              the stream again.
+            </p>
           </div>
         ) : null}
 
@@ -1448,7 +1457,7 @@ export function CameraStreamView() {
               <button
                 type="button"
                 onClick={() => void flipCamera()}
-                className="btn btn-secondary min-h-11! flex-1 border-white/15! bg-white/5! text-slate-100! hover:bg-white/10!"
+                className="btn btn-secondary flex-1 border-white/15 bg-white/5 text-slate-100 hover:bg-white/10"
               >
                 <FlipHorizontal className="h-4 w-4" />
                 Flip camera
@@ -1457,7 +1466,8 @@ export function CameraStreamView() {
                 <button
                   type="button"
                   onClick={() => void toggleTorch()}
-                  className="btn btn-secondary min-h-11! border-white/15! bg-white/5! text-slate-100! hover:bg-white/10!"
+                  className="btn btn-secondary border-white/15 bg-white/5 text-slate-100 hover:bg-white/10"
+                  aria-pressed={torchOn}
                 >
                   <Flashlight className="h-4 w-4" />
                   {torchOn ? "Torch off" : "Torch on"}
@@ -1466,7 +1476,7 @@ export function CameraStreamView() {
               <button
                 type="button"
                 onClick={stopCamera}
-                className="btn btn-danger min-h-11!"
+                className="btn btn-danger"
               >
                 <CameraOff className="h-4 w-4" />
                 Stop
@@ -1521,7 +1531,7 @@ export function CameraStreamView() {
               </p>
             ) : null}
 
-            <p className="flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
+              <p className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
               Detection runs on this phone. Only humans and animals are tracked;
               frames shrink to 320–560 px and slow automatically on 2G/data saver.
@@ -1530,7 +1540,7 @@ export function CameraStreamView() {
           </>
         ) : null}
 
-        <p className="pt-2 text-center text-[11px] text-slate-500">
+        <p className="pt-1 text-center text-xs leading-relaxed text-slate-400">
           Keep this page open and point the rear camera at the field.
         </p>
       </div>

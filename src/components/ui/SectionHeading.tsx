@@ -1,34 +1,50 @@
+"use client";
+
+import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { cn } from "@/lib/cn";
+interface SectionHeadingProps {
+  title: string;
+  subtitle?: string;
+  icon?: ReactNode;
+  action?: ReactNode;
+}
 
+/** Compact workbench heading for interior pages. */
 export function SectionHeading({
   title,
   subtitle,
   icon,
   action,
-  className,
-}: {
-  title: string;
-  subtitle?: string;
-  icon?: ReactNode;
-  action?: ReactNode;
-  className?: string;
-}) {
+}: SectionHeadingProps) {
   return (
-    <div className={cn("flex items-start justify-between gap-3", className)}>
-      <div className="flex items-start gap-3">
+    <header className="flex flex-wrap items-start justify-between gap-5 border-b border-[var(--color-line)] pb-6">
+      <div className="flex min-w-0 flex-[1_1_22rem] items-start gap-3.5">
         {icon ? (
-          <span className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+          <span className="title-icon">
             {icon}
           </span>
         ) : null}
-        <div>
-          <h2 className="text-lg font-bold tracking-tight">{title}</h2>
-          {subtitle ? <p className="muted text-sm">{subtitle}</p> : null}
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold leading-tight sm:text-[1.75rem]">
+            {title}
+          </h1>
+          {subtitle ? (
+            <p className="muted mt-2 max-w-[65ch] text-sm leading-relaxed">
+              {subtitle}
+            </p>
+          ) : null}
         </div>
       </div>
-      {action}
-    </div>
+      {action ? <div className="flex flex-wrap items-center gap-2">{action}</div> : null}
+    </header>
+  );
+}
+
+export function EmptyHint({ href, label }: { href: string; label: string }) {
+  return (
+    <Link href={href} className="btn btn-primary">
+      {label}
+    </Link>
   );
 }

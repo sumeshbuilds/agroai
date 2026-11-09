@@ -6,9 +6,11 @@ import {
   BellOff,
   BellRing,
   Check,
+  PawPrint,
   ShieldAlert,
   Sparkles,
   TriangleAlert,
+  UserRound,
   Volume2,
   VolumeX,
   X,
@@ -22,6 +24,7 @@ import {
   showCameraNotification,
 } from "@/lib/alarm";
 import type { CameraAlertDTO } from "@/lib/camera";
+import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 
@@ -166,14 +169,11 @@ export function CameraAlarmBanner({
   if (alerts.length === 0) {
     return (
       <div
-        className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border border-brand-500/25 bg-brand-500/5 px-3 py-2 text-xs ${className}`}
+        className={cn("alarm-banner flex flex-wrap items-center justify-between gap-3 px-4 py-2", className)}
       >
-        <span className="flex items-center gap-2 font-semibold text-brand-800 dark:text-brand-300">
-          <span className="relative flex h-2 w-2">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-500/60" />
-            <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
-          </span>
-          Human &amp; animal alarm armed
+        <span className="flex flex-wrap items-center gap-2 text-xs font-semibold text-leaf-700">
+          <span aria-hidden className={cn("h-2 w-2 shrink-0 rounded-full", armed ? "bg-leaf-600" : "bg-ink-soft")} />
+          {armed ? "Human & animal alarm armed" : "Human & animal alarm muted"}
           <span className="hidden font-normal text-[var(--muted)] sm:inline">
             · confirmed tracks only
           </span>
@@ -182,19 +182,21 @@ export function CameraAlarmBanner({
         <div className="flex items-center gap-1.5">
           <Link
             href="/watch"
-            className="rounded-md px-2 py-1 font-semibold text-[var(--muted)] hover:text-[var(--foreground)]"
+            className="btn btn-ghost px-3 text-xs text-leaf-700"
           >
             Live watch
           </Link>
           <button
             type="button"
             onClick={() => void toggleArmed()}
-            className="inline-flex items-center gap-1.5 rounded-md border border-[var(--border)] bg-[var(--card)] px-2 py-1 font-semibold hover:bg-[var(--card-muted)]"
+            aria-pressed={armed}
+            aria-label={armed ? "Sound on: mute alarm sound" : "Muted: enable alarm sound"}
+            className="btn btn-secondary px-3 text-xs"
           >
             {armed ? (
-              <Volume2 className="h-3.5 w-3.5" />
+              <Volume2 aria-hidden className="h-3.5 w-3.5" />
             ) : (
-              <VolumeX className="h-3.5 w-3.5" />
+              <VolumeX aria-hidden className="h-3.5 w-3.5" />
             )}
             {armed ? "Sound on" : "Muted"}
           </button>
@@ -205,23 +207,28 @@ export function CameraAlarmBanner({
 
   return (
     <section
-      className={`animate-rise overflow-hidden rounded-xl border border-danger-500/50 bg-danger-500/10 ${className}`}
+      className={cn("alarm-banner overflow-hidden", className)}
+      data-alerting="true"
       aria-live="assertive"
     >
-      <header className="flex flex-wrap items-center gap-2 border-b border-danger-500/25 px-3 py-2">
-        <span className="flex items-center gap-1.5 text-xs font-extrabold uppercase tracking-[0.08em] text-danger-700 dark:text-red-300">
-          <BellRing className="h-4 w-4 animate-pulse" />
+      <header className="flex flex-wrap items-center gap-3 border-b border-danger-500/20 px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-semibold text-danger-700">
+          <BellRing aria-hidden className="h-4 w-4" />
           Field alarm
-          <span className="rounded-full bg-danger-500 px-1.5 py-0.5 text-[10px] font-extrabold text-white">
+          <span className="flex h-6 min-w-6 items-center justify-center rounded-full bg-danger-500 px-1.5 text-xs font-semibold tabular-nums text-white">
             {alerts.length}
           </span>
         </span>
 
-        <div className="ml-auto flex items-center gap-1.5">
+        <div className="ml-auto flex flex-wrap items-center gap-1.5">
+          <Link href="/watch" className="btn btn-ghost px-3 text-xs text-danger-700">
+            Live watch
+          </Link>
           <button
             type="button"
             onClick={() => void toggleArmed()}
-            className="inline-flex items-center gap-1 rounded-md border border-danger-500/30 bg-white/40 px-2 py-1 text-[11px] font-semibold text-danger-800 hover:bg-white/60 dark:bg-white/5 dark:text-red-200 dark:hover:bg-white/10"
+            aria-pressed={armed}
+            className="btn btn-secondary gap-1.5 border-danger-500/25 px-3 text-xs text-danger-700"
             title={armed ? "Mute the alarm siren" : "Enable the alarm siren"}
           >
             {armed ? (
@@ -235,7 +242,7 @@ export function CameraAlarmBanner({
             <button
               type="button"
               onClick={() => void dismissAll()}
-              className="inline-flex items-center gap-1 rounded-md border border-danger-500/30 px-2 py-1 text-[11px] font-semibold text-danger-800 hover:bg-white/40 dark:text-red-200 dark:hover:bg-white/10"
+              className="btn btn-ghost gap-1.5 px-3 text-xs text-danger-700"
             >
               <Check className="h-3.5 w-3.5" />
               Dismiss all
@@ -246,24 +253,24 @@ export function CameraAlarmBanner({
 
       <ul className="divide-y divide-danger-500/15">
         {alerts.slice(0, 3).map((alert) => (
-          <li key={alert.id} className="flex items-center gap-3 px-3 py-2.5">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-danger-500/15 text-lg">
-              {alert.emoji}
+          <li key={alert.id} className="flex items-start gap-3 px-4 py-4">
+            <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-danger-500/10 text-danger-700">
+              {alert.category === "person" ? <UserRound className="h-5 w-5" /> : <PawPrint className="h-5 w-5" />}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="flex flex-wrap items-center gap-x-2 text-sm font-bold text-danger-800 dark:text-red-200">
+              <p className="flex flex-wrap items-center gap-2 text-sm font-semibold leading-relaxed text-danger-700">
                 {alert.message}
                 {alert.verified ? (
                   <span
-                    className="inline-flex items-center gap-1 rounded-full bg-brand-600/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-brand-800 dark:text-brand-300"
+                    className="chip gap-1 bg-accent-50 text-accent-700"
                     title="Confirmed by Groq vision"
                   >
-                    <Sparkles className="h-2.5 w-2.5" />
+                    <Sparkles aria-hidden className="h-3 w-3" />
                     AI verified
                   </span>
                 ) : null}
               </p>
-              <p className="muted mt-0.5 flex flex-wrap items-center gap-x-2 text-xs">
+              <p className="mt-1 flex flex-wrap items-center gap-x-2 text-xs leading-relaxed text-danger-700">
                 <span className="font-semibold text-[var(--foreground)]">
                   {alert.category === "person" ? "Human" : "Animal"}
                 </span>
@@ -286,18 +293,12 @@ export function CameraAlarmBanner({
                 ) : null}
               </p>
             </div>
-            <Link
-              href="/watch"
-              className="hidden rounded-md px-2 py-1 text-[11px] font-bold text-danger-800 hover:bg-white/40 sm:inline dark:text-red-200 dark:hover:bg-white/10"
-            >
-              Open
-            </Link>
             <button
               type="button"
               onClick={() => void dismiss(alert.id)}
               disabled={dismissing === alert.id}
-              aria-label="Dismiss alarm"
-              className="rounded-md p-1.5 text-danger-800 hover:bg-white/40 disabled:opacity-40 dark:text-red-200 dark:hover:bg-white/10"
+              aria-label={`Dismiss alarm: ${alert.message}`}
+              className="icon-btn border-transparent bg-transparent text-danger-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <X className="h-4 w-4" />
             </button>
@@ -305,9 +306,11 @@ export function CameraAlarmBanner({
         ))}
       </ul>
 
-      <p className="flex items-center gap-1.5 border-t border-danger-500/20 px-3 py-1.5 text-[10px] font-medium text-danger-800/80 dark:text-red-300/80">
-        <ShieldAlert className="h-3 w-3 shrink-0" />
-        Raised only for confirmed humans and animals. Other objects are ignored.
+      <div className="flex flex-wrap items-center gap-3 border-t border-danger-500/20 px-4 py-3 text-xs leading-relaxed text-danger-700">
+        <p className="flex min-w-0 flex-1 items-start gap-2">
+          <ShieldAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>Raised only for confirmed humans and animals. Other objects are ignored.</span>
+        </p>
         {alerts.length > 3 ? (
           <span className="ml-auto inline-flex items-center gap-1">
             <TriangleAlert className="h-3 w-3" />+{alerts.length - 3} more
@@ -319,7 +322,7 @@ export function CameraAlarmBanner({
             Siren muted
           </span>
         ) : null}
-      </p>
+      </div>
     </section>
   );
 }

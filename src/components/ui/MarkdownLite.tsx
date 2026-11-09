@@ -24,8 +24,8 @@ export function MarkdownLite({
       <ul key={key} className="space-y-1.5">
         {bullets.map((item, index) => (
           <li key={index} className="flex gap-2">
-            <span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-600" />
-            <span className="leading-relaxed">
+            <span aria-hidden className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-leaf-500" />
+            <span className="min-w-0 leading-relaxed">
               {renderInline(item, `${key}-${index}`)}
             </span>
           </li>
@@ -49,7 +49,7 @@ export function MarkdownLite({
       blocks.push(
         <h3
           key={index}
-          className="text-base font-bold text-brand-800 dark:text-brand-300"
+          className="text-base font-semibold"
         >
           {renderInline(heading[2], `h-${index}`)}
         </h3>,
@@ -68,10 +68,10 @@ export function MarkdownLite({
       flushBullets(`flush-${index}`);
       blocks.push(
         <div key={index} className="flex gap-2">
-          <span className="font-bold text-brand-700 dark:text-brand-300">
+          <span className="shrink-0 font-semibold text-accent-700">
             {numbered[1]}.
           </span>
-          <span className="leading-relaxed">
+          <span className="min-w-0 leading-relaxed">
             {renderInline(numbered[2], `n-${index}`)}
           </span>
         </div>,
@@ -89,7 +89,7 @@ export function MarkdownLite({
 
   flushBullets("flush-end");
 
-  return <div className={cn("space-y-2.5", className)}>{blocks}</div>;
+  return <div className={cn("max-w-[75ch] space-y-3 break-words text-sm", className)}>{blocks}</div>;
 }
 
 function renderInline(text: string, keyPrefix: string): ReactNode[] {
@@ -116,7 +116,7 @@ function renderInline(text: string, keyPrefix: string): ReactNode[] {
       nodes.push(
         <code
           key={`${keyPrefix}-c-${tokenIndex}`}
-          className="rounded bg-black/5 px-1 py-0.5 font-mono text-[0.85em] dark:bg-white/10"
+          className="rounded bg-warn-100 px-1 py-0.5 font-mono text-[0.85em]"
         >
           {token.slice(1, -1)}
         </code>,

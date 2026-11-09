@@ -20,6 +20,7 @@ import {
   PawPrint,
   Play,
   Plus,
+  Radar,
   Radio,
   RefreshCw,
   Ruler,
@@ -29,7 +30,6 @@ import {
   Sparkles,
   Trash2,
   Users,
-  Video,
   WifiOff,
 } from "lucide-react";
 
@@ -37,6 +37,7 @@ import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { SectionHeading } from "@/components/ui/SectionHeading";
 import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 import { ApiError, api } from "@/lib/api-client";
 import {
@@ -365,27 +366,17 @@ export function WatchView() {
         : "No live camera";
 
   return (
-    <div className="w-full px-4 pb-6 pt-4 sm:px-6">
-      <header className="flex flex-wrap items-start justify-between gap-3 pb-4">
-        <div>
-          <h1 className="flex items-center gap-2.5 text-2xl font-semibold tracking-tight sm:text-3xl">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-700 text-white">
-              <Video className="h-5 w-5" />
-            </span>
-            Live field watch
-          </h1>
-          <p className="muted mt-1.5 max-w-2xl text-sm">
-            Your phone is the camera. It detects people and animals on-device and
-            streams annotated frames here in near real time — satellites map the
-            land, cameras watch what moves on it.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
+      <div className="mb-6">
+        <SectionHeading
+          title="Animal & people watch"
+          subtitle="Your phone is the camera. It watches for people and animals on-device and streams what it sees here — satellites map the land, cameras watch what moves on it."
+          icon={<Radar aria-hidden className="h-5 w-5" />}
+          action={<>
           <span
             className={
               selectedSession?.isLive
-                ? "chip chip-danger"
+                ? "chip chip-brand"
                 : selectedSession?.status === "live"
                   ? "chip chip-warn"
                   : "chip bg-[var(--card-muted)] text-[var(--muted)]"
@@ -394,7 +385,7 @@ export function WatchView() {
             <span
               className={
                 selectedSession?.isLive
-                  ? "h-1.5 w-1.5 animate-pulse rounded-full bg-white"
+                  ? "h-1.5 w-1.5 rounded-full bg-leaf-600"
                   : "h-1.5 w-1.5 rounded-full bg-current opacity-50"
               }
             />
@@ -412,15 +403,16 @@ export function WatchView() {
             <Plus className="h-4 w-4" />
             Pair a phone
           </Button>
-        </div>
-      </header>
+          </>}
+        />
+      </div>
 
       <SetupNotice showDatabase={needsSetup} />
 
       {notice ? <Callout tone="success" className="mb-3">{notice}</Callout> : null}
       {error ? <Callout tone="danger" className="mb-3">{error}</Callout> : null}
 
-      <CameraAlarmBanner className="mb-4" intervalMs={4_000} />
+      <CameraAlarmBanner className="mb-6" intervalMs={4_000} />
 
       {sessionsLoading && sessions.length === 0 ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -441,28 +433,29 @@ export function WatchView() {
         />
       ) : (
         <>
-          <nav aria-label="Camera sessions" className="mb-4 flex flex-wrap gap-2">
+          <nav aria-label="Camera sessions" className="mb-5 flex flex-wrap gap-2">
             {sessions.map((session) => (
               <button
                 key={session.id}
                 type="button"
                 onClick={() => setSelectedId(session.id)}
+                aria-pressed={session.id === selectedId}
                 className={
                   session.id === selectedId
-                    ? "btn btn-primary min-h-9! px-3! py-1.5! text-xs!"
-                    : "btn btn-secondary min-h-9! px-3! py-1.5! text-xs!"
+                    ? "btn max-w-full border-leaf-600 bg-leaf-100 text-leaf-700"
+                    : "btn btn-secondary max-w-full"
                 }
               >
                 <span
                   className={
                     session.isLive
-                      ? "h-1.5 w-1.5 rounded-full bg-red-400"
+                       ? "h-1.5 w-1.5 shrink-0 rounded-full bg-leaf-600"
                       : "h-1.5 w-1.5 rounded-full bg-current opacity-40"
                   }
                 />
-                {session.name}
+                <span className="truncate">{session.name}</span>
                 {session.isLive ? (
-                  <span className="rounded-full bg-white/20 px-1.5 py-0.5 text-[9px] font-extrabold">
+                  <span className="text-[0.625rem] font-semibold">
                     LIVE
                   </span>
                 ) : null}
@@ -470,8 +463,8 @@ export function WatchView() {
             ))}
           </nav>
 
-          <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
-            <div className="space-y-4">
+          <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+            <div className="min-w-0 space-y-5">
               {detailError ? <Callout tone="danger">{detailError}</Callout> : null}
 
               <LivePlayer
@@ -480,7 +473,7 @@ export function WatchView() {
                 frameAge={frameAge}
               />
 
-              <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <section aria-label="Camera statistics" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatTile
                   icon={<Users className="h-4 w-4" />}
                   label="People"
@@ -512,24 +505,24 @@ export function WatchView() {
               </section>
 
               <section className="card overflow-hidden">
-                <header className="flex items-center justify-between gap-3 border-b border-[var(--border)] px-4 py-3">
+                <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] p-5">
                   <div>
                     <h2 className="flex items-center gap-2 text-base font-semibold">
-                      <Activity className="h-4 w-4 text-brand-700 dark:text-brand-400" />
+                      <Activity className="h-4 w-4 text-accent-600" />
                       Detection feed
                     </h2>
-                    <p className="muted text-xs">
+                    <p className="muted mt-1.5 text-xs leading-relaxed">
                       Confirmed human and animal tracks from the live camera
                     </p>
                   </div>
-                  <span className="chip chip-brand">
+                  <span className="chip chip-violet">
                     {selectedSession?.totalDetections ?? 0} logged
                   </span>
                 </header>
 
                 {!activeDetail || activeDetail.detections.length === 0 ? (
-                  <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
-                    <Eye className="h-6 w-6 text-brand-600 dark:text-brand-400" />
+                  <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
+                    <Eye className="h-6 w-6 text-[var(--color-ink-soft)]" />
                     <p className="text-sm font-semibold">No tracks logged yet</p>
                     <p className="muted max-w-sm text-xs leading-relaxed">
                       Walk a person or animal through the camera frame. Each new
@@ -544,7 +537,7 @@ export function WatchView() {
                       return (
                         <li
                           key={detection.id}
-                          className="flex items-center gap-3 px-4 py-2.5"
+                          className="flex items-center gap-3 px-5 py-4"
                         >
                           <span
                             className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-base ${style.text}`}
@@ -589,10 +582,10 @@ export function WatchView() {
               </section>
             </div>
 
-            <aside className="space-y-4">
+            <aside className="min-w-0 space-y-5">
               <section className="card overflow-hidden">
-                <header className="flex items-center gap-2 border-b border-[var(--border)] px-4 py-3">
-                  <Smartphone className="h-4 w-4 text-brand-700 dark:text-brand-400" />
+                <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] p-5">
+                  <Smartphone className="h-4 w-4 text-accent-600" />
                   <h2 className="text-base font-semibold">Phone pairing</h2>
                   {selectedSession?.isLive ? (
                     <span className="chip chip-brand ml-auto">
@@ -602,34 +595,35 @@ export function WatchView() {
                   ) : null}
                 </header>
 
-                <div className="space-y-3 p-4">
+                <div className="space-y-4 p-5">
                   {selectedSession ? (
                     <>
-                      <div className="flex items-start gap-3">
-                        <div className="rounded-xl border border-[var(--border)] bg-white p-2 shadow-sm">
+                      <div className="grid grid-cols-1 items-start gap-4 min-[380px]:grid-cols-[8rem_minmax(0,1fr)] sm:grid-cols-[9rem_minmax(0,1fr)]">
+                        <div className="w-40 max-w-full rounded-xl bg-white p-2 min-[380px]:w-auto">
                           {phoneUrl ? (
                             <QRCode
                               value={phoneUrl}
                               size={168}
+                              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
                               bgColor="#ffffff"
-                              fgColor="#0b120d"
+                              fgColor="#18291f"
                             />
                           ) : (
-                            <div className="h-[168px] w-[168px] animate-pulse-soft rounded bg-slate-100" />
+                            <div className="aspect-square w-full animate-pulse-soft rounded bg-card-muted" />
                           )}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-bold">{selectedSession.name}</p>
-                          <p className="muted mt-1 text-xs leading-relaxed">
+                          <p className="break-words text-sm font-semibold">{selectedSession.name}</p>
+                          <p className="muted mt-2 text-xs leading-relaxed">
                             Scan with the phone camera, allow camera + location,
                             then tap <strong>Start camera stream</strong>.
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
-                            <span className="chip bg-[var(--card-muted)] text-[var(--muted)]">
+                            <span className="chip max-w-full whitespace-normal break-words bg-[var(--card-muted)] text-[var(--muted)]">
                               {selectedSession.deviceLabel ?? "Waiting for phone"}
                             </span>
                             {selectedSession.lat !== null ? (
-                              <span className="chip chip-brand">
+                              <span className="chip chip-violet">
                                 <MapPin className="h-3 w-3" />
                                 GPS linked
                               </span>
@@ -638,8 +632,8 @@ export function WatchView() {
                         </div>
                       </div>
 
-                      <div className="rounded-xl border border-[var(--border)] bg-[var(--card-muted)] p-2.5">
-                        <p className="muted mb-1 text-[10px] font-bold uppercase tracking-[0.08em]">
+                      <div className="rounded-xl bg-[var(--card-muted)] p-3">
+                        <p className="muted mb-1.5 text-xs font-medium">
                           Camera link
                         </p>
                         <p className="break-all font-mono text-[11px] leading-relaxed">
@@ -666,11 +660,11 @@ export function WatchView() {
                       </div>
 
                       {!phoneIsSecure ? (
-                        <details className="rounded-xl border border-warn-500/40 bg-warn-500/10 px-3 py-2 text-xs text-warn-700 dark:text-amber-300">
-                          <summary className="cursor-pointer font-bold">
+                        <details className="rounded-xl bg-warn-100 px-3.5 py-2 text-xs text-warn-700">
+                          <summary className="min-h-11 content-center font-semibold leading-relaxed">
                             Phone camera needs HTTPS — tap for setup
                           </summary>
-                          <ol className="mt-2 list-decimal space-y-1.5 pl-4 leading-relaxed">
+                          <ol className="mb-2 mt-2 list-decimal space-y-2 break-words pl-4 leading-relaxed [overflow-wrap:anywhere]">
                             <li>
                               Best for the exhibition: deploy to Vercel or use a
                               Cloudflare / ngrok HTTPS tunnel.
@@ -694,7 +688,7 @@ export function WatchView() {
                         </details>
                       ) : null}
 
-                      <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-3">
+                      <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">
                         {selectedSession.status === "ended" ? (
                           <Button
                             onClick={() => void setStatus("live")}
@@ -729,26 +723,26 @@ export function WatchView() {
                 </div>
               </section>
 
-              <section className="card p-4">
-                <div className="flex items-center justify-between gap-2">
+              <section className="card p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="flex items-center gap-2 text-base font-semibold">
-                    <MapPin className="h-4 w-4 text-brand-700 dark:text-brand-400" />
+                    <MapPin className="h-4 w-4 text-leaf-600" />
                     Field context
                   </h2>
-                  <Link href="/map" className="muted text-xs font-semibold hover:text-[var(--foreground)]">
+                  <Link href="/map" className="inline-flex min-h-11 items-center text-xs font-medium text-accent-700 underline-offset-4 hover:underline">
                     Satellite map
                   </Link>
                 </div>
 
                 {selectedSession?.farm ? (
-                  <div className="mt-3 rounded-xl border border-brand-500/30 bg-brand-500/10 p-3">
-                    <p className="text-sm font-bold">{selectedSession.farm.name}</p>
-                    <p className="muted mt-0.5 text-xs">
+                  <div className="mt-3 border-b border-[var(--border)] pb-4">
+                    <p className="text-sm font-semibold">{selectedSession.farm.name}</p>
+                    <p className="muted mt-1.5 text-xs leading-relaxed">
                       Camera is {formatDistance(selectedSession.farm.distanceKm)} to
                       the {selectedSession.farm.direction} of this field.
                     </p>
                     {selectedSession.farm.distanceKm > CAMERA_WATCH_RADIUS_KM ? (
-                      <p className="mt-1 text-xs font-semibold text-warn-700 dark:text-amber-300">
+                      <p className="mt-1 text-xs font-semibold text-mustard-600">
                         Camera is outside the {CAMERA_WATCH_RADIUS_KM} km field
                         watch radius.
                       </p>
@@ -761,7 +755,7 @@ export function WatchView() {
                   </p>
                 )}
 
-                <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
                   <ContextRow
                     icon={<Ruler className="h-3.5 w-3.5" />}
                     label="Live camera"
@@ -793,7 +787,7 @@ export function WatchView() {
                 </div>
 
                 <div className="mt-3 border-t border-[var(--border)] pt-3">
-                  <p className="muted text-[10px] font-bold uppercase tracking-[0.08em]">
+                  <p className="muted text-xs font-medium">
                     Weather at the camera
                   </p>
                   {weather ? (
@@ -823,12 +817,12 @@ export function WatchView() {
                 </div>
               </section>
 
-              <section className="card p-4">
+              <section className="card p-5">
                 <h2 className="flex items-center gap-2 text-base font-semibold">
-                  <Sparkles className="h-4 w-4 text-brand-700 dark:text-brand-400" />
+                  <Sparkles className="h-4 w-4 text-accent-600" />
                   Demo in 4 steps
                 </h2>
-                <ol className="mt-2.5 space-y-2">
+                <ol className="mt-4 space-y-3">
                   {[
                     "Pair a phone and open the QR link on your mobile.",
                     "Allow camera + location; tap Start camera stream.",
@@ -836,7 +830,7 @@ export function WatchView() {
                     "Watch the box, label, confidence and movement trail appear here.",
                   ].map((step, index) => (
                     <li key={step} className="flex items-start gap-2 text-xs leading-relaxed">
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-brand-700 text-[10px] font-extrabold text-white">
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-leaf-100 text-[10px] font-semibold text-leaf-700">
                         {index + 1}
                       </span>
                       <span>{step}</span>
@@ -867,14 +861,14 @@ function LivePlayer({
   frameAge: number | null;
 }) {
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-slate-800 bg-slate-950 shadow-xl">
+    <section className="camera-surface relative overflow-hidden rounded-2xl bg-slate-950 shadow-[var(--shadow-card)]" aria-label="Camera preview">
       <div
-        className="relative w-full"
+        className="relative aspect-[4/3] w-full sm:aspect-video"
         style={{
           aspectRatio:
             session?.frameWidth && session?.frameHeight
               ? `${session.frameWidth} / ${session.frameHeight}`
-              : "16 / 9",
+              : undefined,
         }}
       >
         {session?.frameUrl ? (
@@ -885,9 +879,11 @@ function LivePlayer({
             className="absolute inset-0 h-full w-full object-contain"
           />
         ) : (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-[radial-gradient(circle_at_50%_35%,rgba(16,185,129,0.16),transparent_60%)] px-6 text-center">
-            <Camera className="h-8 w-8 text-emerald-400" />
-            <p className="text-sm font-bold text-slate-100">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 py-14 text-center">
+            <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-800 text-leaf-300">
+              <Camera aria-hidden className="h-6 w-6" />
+            </span>
+            <p className="text-sm font-semibold text-slate-100">
               Waiting for the phone camera
             </p>
             <p className="max-w-xs text-xs leading-relaxed text-slate-400">
@@ -903,7 +899,7 @@ function LivePlayer({
           return (
             <div
               key={detection.trackId}
-              className={`absolute border-2 transition-all duration-300 ease-out ${style.border}`}
+              className={`pointer-events-none absolute border-2 ${style.border}`}
               style={{
                 left: `${x * 100}%`,
                 top: `${y * 100}%`,
@@ -962,14 +958,14 @@ function LivePlayer({
           <span
             className={
               session?.isLive
-                ? "inline-flex items-center gap-1.5 rounded-full bg-red-500/90 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-white"
-                : "inline-flex items-center gap-1.5 rounded-full bg-slate-700/90 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-[0.08em] text-slate-200"
+                 ? "inline-flex items-center gap-1.5 rounded-full bg-danger-500 px-2.5 py-1 text-[11px] font-semibold text-white"
+                 : "inline-flex items-center gap-1.5 rounded-full bg-slate-800 px-2.5 py-1 text-[11px] font-semibold text-slate-200"
             }
           >
             <span
               className={
                 session?.isLive
-                  ? "h-1.5 w-1.5 animate-pulse rounded-full bg-white"
+                   ? "h-1.5 w-1.5 animate-pulse-soft rounded-full bg-white"
                   : "h-1.5 w-1.5 rounded-full bg-slate-400"
               }
             />
@@ -1015,16 +1011,11 @@ function LivePlayer({
           </span>
         </div>
 
-        {session?.isLive ? (
-          <div className="pointer-events-none absolute inset-0 overflow-hidden">
-            <div className="live-scanline absolute inset-x-0 h-16 bg-gradient-to-b from-transparent via-emerald-400/10 to-transparent" />
-          </div>
-        ) : null}
       </div>
 
-      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-900/80 px-3 py-2">
+      <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-900 px-4 py-3.5">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-          <Camera className="h-3.5 w-3.5 text-emerald-400" />
+          <Camera className="h-3.5 w-3.5 text-leaf-300" />
           {session?.name ?? "Field camera"}
           {session?.deviceLabel ? (
             <span className="font-normal text-slate-400">
@@ -1065,15 +1056,15 @@ function StatTile({
     <div
       className={
         accent
-          ? "card border-danger-500/40 bg-danger-500/5 p-3"
-          : "card p-3"
+            ? "card bg-danger-100 p-4"
+            : "card p-4"
       }
     >
-      <p className="muted flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-[0.08em]">
+      <p className="muted flex items-center gap-1.5 text-xs font-medium">
         {icon}
         {label}
       </p>
-      <p className="mt-0.5 text-xl font-bold tabular-nums">{value}</p>
+      <p className="mt-2 text-xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }
@@ -1088,12 +1079,12 @@ function ContextRow({
   value: string;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--border)] bg-[var(--card-muted)] px-2.5 py-2">
-      <p className="muted flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.07em]">
+    <div className="min-w-0 py-2">
+      <p className="muted flex items-center gap-1.5 text-xs font-medium">
         {icon}
         {label}
       </p>
-      <p className="mt-0.5 truncate text-xs font-semibold tabular-nums">{value}</p>
+      <p className="mt-1 break-words text-xs font-semibold tabular-nums">{value}</p>
     </div>
   );
 }

@@ -6,23 +6,22 @@ import {
   LayoutDashboard,
   Leaf,
   Map as MapIcon,
+  Radar,
   Sprout,
-  UserRound,
-  Video,
 } from "lucide-react";
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { useSessionFarmer } from "@/components/auth/session";
-import { cn } from "@/lib/cn";
 
 const LINKS = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/map", label: "Farm Map", icon: MapIcon },
+  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/map", label: "Field map", icon: MapIcon },
+  { href: "/watch", label: "Watch", icon: Radar },
   { href: "/crops", label: "Crops", icon: Sprout },
-  { href: "/watch", label: "Live Watch", icon: Video },
 ];
 
-export function AppNav() {
+/** Desktop: the dark icon rail pinned to the left edge of the workstation. */
+export function AppRail() {
   const pathname = usePathname();
   const farmer = useSessionFarmer();
 
@@ -30,72 +29,98 @@ export function AppNav() {
     href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
-    <>
-      <header className="sticky top-0 z-[1000] border-b border-[var(--border)] bg-[var(--card)]/95 backdrop-blur">
-        <div className="flex h-16 w-full items-center justify-between gap-3 px-4 sm:px-6">
-          <Link
-            href="/"
-            className="flex items-center gap-2.5 font-semibold tracking-tight"
+    <aside
+      aria-label="Primary"
+      className="rail flex h-full w-[5.25rem] shrink-0 flex-col items-center gap-2 py-4"
+    >
+      <Link
+        href="/"
+        aria-label="AgroAI home"
+        title="AgroAI"
+        className="brand-mark mb-5 h-12 w-12"
+      >
+        <Leaf className="h-5 w-5" strokeWidth={2.4} />
+      </Link>
+
+      <nav className="flex flex-1 flex-col items-center gap-2">
+        {LINKS.map(({ href, label, icon: Icon }) => {
+          const active = isActive(href);
+          return (
+            <Link
+              key={href}
+              href={href}
+              aria-current={active ? "page" : undefined}
+              title={label}
+              data-active={active}
+              className="rail-btn rail-link"
+            >
+              <Icon className="h-5 w-5" strokeWidth={1.8} />
+              <span className="text-[0.625rem] font-medium leading-none">{label}</span>
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="flex flex-col items-center gap-1">
+        {farmer ? (
+          <span
+            className="mb-2 inline-flex h-10 w-10 items-center justify-center"
+            title={`Signed in as ${farmer.name}`}
+            aria-label={`Signed in as ${farmer.name}`}
           >
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-700 text-white shadow-sm">
-              <Leaf className="h-[1.15rem] w-[1.15rem]" strokeWidth={2.4} />
-            </span>
-            <span className="text-[1.35rem] leading-none">
-              Agro
-              <span className="text-brand-700 dark:text-brand-400">AI</span>
-            </span>
-          </Link>
+            <i className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-xs font-semibold uppercase text-leaf-100 not-italic ring-1 ring-white/15">
+              {farmer.name.slice(0, 2)}
+            </i>
+          </span>
+        ) : null}
+        <SignOutButton rail />
+      </div>
+    </aside>
+  );
+}
 
-          <nav className="hidden items-center gap-1 md:flex">
-            {LINKS.map(({ href, label, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className={cn(
-                  "flex items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium transition-colors duration-150",
-                  isActive(href)
-                    ? "bg-brand-700 text-white shadow-sm"
-                    : "muted hover:bg-[var(--card-muted)] hover:text-[var(--foreground)]",
-                )}
-              >
-                <Icon className="h-4 w-4" />
-                {label}
-              </Link>
-            ))}
-          </nav>
+/** Mobile: compact top bar + the floating dock. */
+export function AppMobile() {
+  const pathname = usePathname();
 
-          <div className="flex items-center gap-2">
-            {farmer ? (
-              <span className="hidden items-center gap-1.5 rounded-full bg-[var(--card-muted)] px-3 py-2 text-sm font-semibold sm:inline-flex">
-                <UserRound className="h-4 w-4 text-brand-700 dark:text-brand-400" />
-                <span className="max-w-32 truncate">{farmer.name}</span>
-              </span>
-            ) : null}
-            <SignOutButton compact />
-          </div>
-        </div>
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
+
+  return (
+    <>
+      <header className="flex h-16 items-center justify-between border-b border-[var(--color-line)] bg-[var(--background)] px-4">
+        <Link
+          href="/"
+          className="flex min-h-11 items-center gap-2 text-[1.05rem] font-semibold tracking-tight"
+        >
+          <span className="brand-mark h-9 w-9">
+            <Leaf className="h-4 w-4" strokeWidth={2.4} />
+          </span>
+          AgroAI
+        </Link>
+        <SignOutButton compact />
       </header>
 
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-[1000] border-t border-[var(--border)] bg-[var(--card)]/95 backdrop-blur md:hidden"
+        className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[1000]"
       >
-        <div className="grid w-full grid-cols-4">
-          {LINKS.map(({ href, label, icon: Icon }) => (
-            <Link
-              key={href}
-              href={href}
-              className={cn(
-                "flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold",
-                isActive(href)
-                  ? "text-brand-700 dark:text-brand-400"
-                  : "muted",
-              )}
-            >
-              <Icon className="h-5 w-5" />
-              {label}
-            </Link>
-          ))}
+        <div className="dock mx-auto grid w-full max-w-sm grid-cols-4 gap-1 p-1.5">
+          {LINKS.map(({ href, label, icon: Icon }) => {
+            const active = isActive(href);
+            return (
+              <Link
+                key={href}
+                href={href}
+                aria-current={active ? "page" : undefined}
+                data-active={active}
+                className="dock-link"
+              >
+                <Icon className="h-5 w-5" strokeWidth={1.8} />
+                {label}
+              </Link>
+            );
+          })}
         </div>
       </nav>
     </>

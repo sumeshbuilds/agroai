@@ -1,201 +1,705 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import {
   ArrowRight,
-  Camera,
-  Map as MapIcon,
+  Droplets,
+  Gauge,
+  LayoutGrid,
   MapPin,
-  RefreshCw,
-  Sparkles,
   Sprout,
-  Video,
+  Thermometer,
+  TriangleAlert,
+  Wind,
 } from "lucide-react";
 
-import { useSessionFarmer } from "@/components/auth/session";
-import { CropDayGuide } from "@/components/dashboard/CropDayGuide";
-import { PestSirenCard } from "@/components/dashboard/PestSirenCard";
-import { ReportCard } from "@/components/crops/ReportCard";
+import { AreaPanel } from "@/components/dashboard/AreaPanel";
 import { SetupNotice } from "@/components/setup/SetupNotice";
-import { Button } from "@/components/ui/Button";
-import { Callout } from "@/components/ui/Callout";
-import { EmptyState } from "@/components/ui/EmptyState";
-import { LiveWatchCard } from "@/components/watch/LiveWatchCard";
 import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
-import { WeatherCard } from "@/components/weather/WeatherCard";
+import { FarmSwitcher, WorkbenchBar } from "@/components/layout/PageBar";
 import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
+import { acresToSquareMetres } from "@/lib/format";
 import { useFarms } from "@/lib/hooks/use-farms";
-import { formatAcres, formatRelative } from "@/lib/format";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
-import type { WeatherSnapshot, WeatherWarning } from "@/lib/weather";
+import type { DailyForecast, WeatherSnapshot, WeatherWarning } from "@/lib/weather";
 
-// Leaflet must never render on the server (ARCHITECTURE.md rule #1).
-const FarmMap = nextDynamic(
+const FarmMap = dynamic(
   () => import("@/components/map/FarmMap").then((mod) => mod.FarmMap),
-  {
-    ssr: false,
-    loading: () => (
-      <div className="card h-full min-h-[420px] animate-pulse-soft rounded-2xl" />
-    ),
-  },
+  { ssr: false },
 );
 
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function weekday(iso: string) {
+  const date = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? iso : WEEKDAYS[date.getDay()];
+}
+
+/** Per-day suitability for field work (planting / spraying / moving soil). */
+type DayWork = "good" | "fair" | "poor";
+
+function dayWork(day: DailyForecast): { level: DayWork; reason: string } {
+  if (day.precipitationProbability >= 60 || day.precipitationSum >= 6)
+    return { level: "poor", reason: `Rain likely — ${Math.round(day.precipitationProbability)}% chance` };
+  if (day.windSpeedMax >= 35)
+    return { level: "poor", reason: `Wind ${Math.round(day.windSpeedMax)} km/h — no spraying` };
+  if (day.precipitationProbability >= 30 || day.tempMax >= 40)
+    return { level: "fair", reason: "Isolated showers or heat — plan around it" };
+  return { level: "good", reason: "Dry and calm window" };
+}
+
+const DAY_TONES: Record<DayWork, { fill: string; text: string }> = {
+  good: { fill: "bg-leaf-400", text: "text-leaf-700" },
+  fair: { fill: "bg-warn-500", text: "text-warn-700" },
+  poor: { fill: "bg-danger-500", text: "text-danger-700" },
+};
+
+function soilTone(value: number): string {
+  if (value < 0.1) return "bg-danger-500";
+  if (value < 0.18) return "bg-danger-500/70";
+  if (value < 0.28) return "bg-warn-500";
+  return "bg-leaf-500";
+}
+
 export function DashboardView() {
-  const farmer = useSessionFarmer();
-  const { farms, loading: farmsLoading, needsSetup, refresh } = useFarms();
+  const { farms, needsSetup, loading: farmsLoading } = useFarms();
   const [farmId, setFarmId] = useState<number | null>(null);
+  const [panelOpen, setPanelOpen] = useState(true);
 
   const [crops, setCrops] = useState<CropDTO[]>([]);
-  const [cropsLoading, setCropsLoading] = useState(true);
-
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [warnings, setWarnings] = useState<WeatherWarning[]>([]);
-  const [weatherLoading, setWeatherLoading] = useState(false);
-
+  const [weatherLoading, setWeatherLoading] = useState(true);
   const [cameras, setCameras] = useState<CameraSessionDTO[]>([]);
-  const [camerasLoading, setCamerasLoading] = useState(true);
   const [reports, setReports] = useState<WeeklyReportDTO[]>([]);
-  const [reportsLoading, setReportsLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
 
   const selectedFarm = useMemo(
     () => farms.find((farm) => farm.id === farmId) ?? farms[0] ?? null,
     [farms, farmId],
   );
+  const selectedFarmIndex = selectedFarm
+    ? farms.findIndex((farm) => farm.id === selectedFarm.id)
+    : 0;
 
-  const activeCrop = useMemo(
-    () => crops.find((crop) => crop.isActive) ?? crops[0] ?? null,
-    [crops],
+  const farmCrops = useMemo(() => {
+    if (!selectedFarm) return [];
+    return crops.filter(
+      (crop) =>
+        crop.farmlandId === selectedFarm.id ||
+        crop.farmlandName === selectedFarm.name,
+    );
+  }, [crops, selectedFarm]);
+  const farmCrop = farmCrops.find((crop) => crop.isActive) ?? farmCrops[0] ?? null;
+
+  const farmCameras = useMemo(
+    () => (selectedFarm ? cameras.filter((camera) => camera.farm?.id === selectedFarm.id) : []),
+    [cameras, selectedFarm],
+  );
+  const latestReport = useMemo(
+    () =>
+      reports.find(
+        (report) => farmCrop && report.cropId === farmCrop.id,
+      ) ??
+      reports.find((report) => report.cropId === null) ??
+      null,
+    [reports, farmCrop],
   );
 
   useEffect(() => {
     let active = true;
-    void (async () => {
-      try {
-        const { crops: list } = await api.listCrops();
+    void api
+      .listCrops()
+      .then(({ crops: list }) => {
         if (active) setCrops(list);
-      } catch {
-        // The dashboard still works without the crop guide.
-      } finally {
-        if (active) setCropsLoading(false);
-      }
-    })();
+      })
+      .catch(() => undefined);
     return () => {
       active = false;
-    };
-  }, []);
-
-  const loadReports = useCallback(async () => {
-    try {
-      const data = await api.listReports({ limit: 1 });
-      setReports(data.reports);
-    } catch {
-      // Silent: the reports section simply stays empty.
-    }
-  }, []);
-
-  useEffect(() => {
-    let active = true;
-    void (async () => {
-      await loadReports();
-      if (active) setReportsLoading(false);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [loadReports]);
-
-  useEffect(() => {
-    let active = true;
-
-    const load = async () => {
-      try {
-        const data = await api.listCameraSessions();
-        if (active) setCameras(data.sessions);
-      } catch {
-        // The rest of the dashboard works without live cameras.
-      } finally {
-        if (active) setCamerasLoading(false);
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 5000);
-
-    return () => {
-      active = false;
-      window.clearInterval(timer);
     };
   }, []);
 
   useEffect(() => {
     if (!selectedFarm) return;
-    const activeFarm = selectedFarm;
-
+    const farm = selectedFarm;
     let cancelled = false;
 
     const load = async () => {
       setWeatherLoading(true);
       try {
-        const weatherRes = await api.getWeatherByFarm(activeFarm.id);
+        const result = await api.getWeatherByFarm(farm.id);
         if (cancelled) return;
-        setWeather(weatherRes.weather);
-        setWarnings(weatherRes.warnings);
-      } catch (cause) {
-        if (!cancelled) {
-          setNotice(
-            cause instanceof Error
-              ? cause.message
-              : "Could not load live weather.",
-          );
-        }
+        setWeather(result.weather);
+        setWarnings(result.warnings);
+      } catch {
+        if (!cancelled) setWeather(null);
       } finally {
         if (!cancelled) setWeatherLoading(false);
       }
     };
 
     void load();
-
-    // Re-fetch every 10 minutes so the map markers and "Now" tiles track
-    // Open-Meteo's 15-minute nowcast cadence without a manual reload.
-    const refreshTimer = window.setInterval(load, 10 * 60 * 1000);
-
+    const timer = window.setInterval(load, 10 * 60 * 1000);
     return () => {
       cancelled = true;
-      window.clearInterval(refreshTimer);
+      window.clearInterval(timer);
     };
   }, [selectedFarm]);
 
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      try {
+        const data = await api.listCameraSessions();
+        if (active) setCameras(data.sessions);
+      } catch {
+        // Cameras are one source among several here.
+      }
+    };
+    void load();
+    const timer = window.setInterval(load, 5_000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const loadReports = useCallback(async () => {
+    try {
+      const data = await api.listReports({ limit: 5 });
+      setReports(data.reports);
+    } catch {
+      // Insights stay empty; the generate button offers a retry.
+    }
+  }, []);
+
+  useEffect(() => {
+    const kickoff = window.setTimeout(() => void loadReports(), 0);
+    return () => window.clearTimeout(kickoff);
+  }, [loadReports]);
+
   const handleGenerate = async () => {
     setGenerating(true);
-    setNotice(null);
+    setReportError(null);
     try {
-      const result = await api.generateReport();
+      await api.generateReport(farmCrop?.id);
       await loadReports();
-      setNotice(
-        result.message ??
-          `Generated ${result.generated.length} weekly report${result.generated.length === 1 ? "" : "s"}.`,
-      );
     } catch (cause) {
-      setNotice(
-        cause instanceof ApiError
-          ? cause.message
-          : "Could not generate the weekly report.",
+      setReportError(
+        cause instanceof ApiError ? cause.message : "Could not generate the advisory.",
       );
     } finally {
       setGenerating(false);
     }
   };
 
-  const hasFarms = farms.length > 0;
-  const totalAcres = farms.reduce((sum, farm) => sum + (farm.areaAcres ?? 0), 0);
-  const liveCamera =
-    cameras.find((camera) => camera.isLive) ?? cameras[0] ?? null;
-  const liveAt = weather?.fetchedAt
+  if (farmsLoading && farms.length === 0) {
+    return <DashboardSkeleton />;
+  }
+
+  const hasFarms = farms.length > 0 && selectedFarm !== null;
+
+  if (!hasFarms) {
+    return (
+      <div className="px-4 py-6 sm:px-6">
+        <h1 className="sr-only">Field workstation</h1>
+        <WorkbenchBar
+          left={
+            <span className="flex items-center gap-2 text-sm font-semibold">
+              <LayoutGrid className="h-4 w-4 text-[var(--color-ink-soft)]" />
+              Field workstation
+            </span>
+          }
+        />
+        <SetupNotice showDatabase={needsSetup} />
+        <section className="card mx-auto mt-8 flex max-w-xl flex-col items-center gap-5 px-6 py-12 text-center sm:px-10">
+          <span className="title-icon">
+            <MapPin className="h-6 w-6" />
+          </span>
+          <div>
+            <h2 className="text-2xl font-semibold">Map your first field</h2>
+            <p className="muted mx-auto mt-3 max-w-sm text-sm leading-relaxed">
+              Trace the boundary on the satellite map. Its centre then powers
+              live weather, growth guides and camera tracking for this
+              workstation.
+            </p>
+          </div>
+          <Link href="/map" className="btn btn-primary">
+            Open field map
+            <ArrowRight className="h-4 w-4" />
+          </Link>
+        </section>
+      </div>
+    );
+  }
+
+  const areaSqm = selectedFarm.areaAcres
+    ? acresToSquareMetres(selectedFarm.areaAcres)
+    : null;
+
+  return (
+    <div className="flex min-h-full flex-col px-4 py-5 sm:px-6 xl:h-full xl:min-h-0 xl:py-6">
+      <h1 className="sr-only">Field workstation</h1>
+      <CameraAlarmBanner className="mb-5" intervalMs={6_000} />
+
+      <WorkbenchBar
+        left={
+          <FarmSwitcher
+            farms={farms}
+            selectedId={selectedFarm?.id ?? null}
+            onSelect={(id) => {
+              setFarmId(id);
+              setPanelOpen(true);
+              setReportError(null);
+            }}
+          />
+        }
+      />
+
+      {/* The workstation split: analytics column + satellite operations map */}
+      <div className="mt-5 flex flex-1 flex-col gap-6 xl:min-h-0 xl:flex-row xl:gap-5 xl:overflow-hidden">
+        {/* Analytics column — scrolls on its own on desktop */}
+        <section
+          aria-label="Field analytics"
+          tabIndex={0}
+          className="order-2 space-y-4 focus-visible:outline-offset-[-2px] xl:order-1 xl:min-h-0 xl:w-[24rem] xl:shrink-0 xl:overflow-y-auto xl:pr-1 xl:pb-2"
+        >
+          {/* Field summary */}
+          <section className="card field-summary p-5">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="flex items-center gap-1.5 text-xl font-semibold leading-tight">
+                  <span className="truncate">{selectedFarm.name}</span>
+                </h2>
+                <p className="muted mt-2 text-xs tabular-nums">
+                  {selectedFarm.centroidLat.toFixed(4)}°N,{" "}
+                  {selectedFarm.centroidLng.toFixed(4)}°E
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[1.375rem] font-semibold leading-tight tabular-nums">
+                  {areaSqm ? Math.round(areaSqm).toLocaleString() : "—"}
+                  <span className="ml-1 text-[0.6875rem] font-medium uppercase text-[var(--color-ink-soft)]">
+                    sqm
+                  </span>
+                </p>
+                {farmCameras.length > 0 ? (
+                  <p className="mt-2 text-[0.6875rem] font-medium text-leaf-700">
+                    {farmCameras.filter((camera) => camera.isLive).length}{" "}
+                    camera{farmCameras.length === 1 ? "" : "s"} linked
+                  </p>
+                ) : null}
+              </div>
+            </div>
+          </section>
+
+          <MetricsGrid weather={weather} loading={weatherLoading} />
+
+          <OutlookCard days={weather?.daily.slice(0, 7) ?? []} loading={weatherLoading} />
+
+          <SoilCard points={weather?.hourlySoilMoisture ?? []} loading={weatherLoading} />
+
+          <ForecastCard weather={weather} warnings={warnings} loading={weatherLoading} />
+        </section>
+
+        {/* Map column */}
+        <section
+          aria-label="Satellite map"
+          className="order-1 flex flex-col gap-4 xl:order-2 xl:min-h-0 xl:flex-1"
+        >
+          <div className="relative overflow-hidden rounded-2xl xl:min-h-0 xl:flex-1">
+            <div className="relative h-[24rem] sm:h-[28rem] xl:h-full">
+              <FarmMap
+                farms={farms}
+                selectedFarm={selectedFarm}
+                cameras={cameras}
+                detailsOpen={panelOpen}
+                onSelectFarm={(id) => {
+                  setFarmId(id);
+                  setPanelOpen(true);
+                  setReportError(null);
+                }}
+              />
+            </div>
+
+            {panelOpen ? (
+              <>
+                {/* Desktop: floating panel over the map, like the reference */}
+                <AreaPanel
+                  key={selectedFarm.id}
+                  index={selectedFarmIndex < 0 ? 0 : selectedFarmIndex}
+                  farm={selectedFarm}
+                  crops={farmCrops}
+                  weather={weather}
+                  weatherLoading={weatherLoading}
+                  cameras={farmCameras}
+                  report={latestReport}
+                  generating={generating}
+                  generationError={reportError}
+                  onGenerate={() => void handleGenerate()}
+                  onClose={() => setPanelOpen(false)}
+                  className="hidden xl:absolute xl:inset-y-4 xl:right-4 xl:z-[600] xl:flex xl:w-[21.5rem]"
+                />
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setPanelOpen(true)}
+                className="toolbar-btn absolute right-3 top-3 z-[600] border-transparent text-xs"
+              >
+                <Sprout className="h-3.5 w-3.5" />
+                Field details
+              </button>
+            )}
+          </div>
+          {/* Mobile panels flow below the map instead of shrinking inside it. */}
+          {panelOpen ? (
+            <AreaPanel
+              key={`mobile-${selectedFarm.id}`}
+              index={selectedFarmIndex < 0 ? 0 : selectedFarmIndex}
+              farm={selectedFarm}
+              crops={farmCrops}
+              weather={weather}
+              weatherLoading={weatherLoading}
+              cameras={farmCameras}
+              report={latestReport}
+              generating={generating}
+              generationError={reportError}
+              onGenerate={() => void handleGenerate()}
+              onClose={() => setPanelOpen(false)}
+              className="xl:hidden"
+            />
+          ) : null}
+        </section>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------
+   Left-column cards
+------------------------------------------------------------------------- */
+
+function MetricTile({
+  icon,
+  label,
+  value,
+  unit,
+  rows,
+  hint,
+  loading,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  unit: string;
+  rows?: { label: string; value: string }[];
+  hint?: string | null;
+  loading: boolean;
+  tone: "accent" | "info" | "leaf" | "soil";
+}) {
+  const iconTone = {
+    accent: "bg-accent-50 text-accent-700",
+    info: "bg-info-100 text-info-700",
+    leaf: "bg-leaf-100 text-leaf-700",
+    soil: "bg-soil-100 text-soil-700",
+  }[tone];
+
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-ink-soft">
+          {label}
+        </p>
+        <span className={`metric-icon ${iconTone}`}>{icon}</span>
+      </div>
+      {loading ? (
+        <div className="mt-1.5 h-8 w-20 animate-pulse-soft rounded-lg bg-paper-deep" />
+      ) : (
+        <p className="mt-2 flex items-baseline gap-1 text-[1.75rem] font-semibold leading-none tabular-nums">
+          {value}
+          <span className="text-sm font-medium text-ink-soft">
+            {unit}
+          </span>
+        </p>
+      )}
+      <div className="mt-3 space-y-1 text-xs">
+        {rows?.map((row) => (
+          <p
+            key={row.label}
+            className="flex items-center justify-between gap-2 tabular-nums"
+          >
+            <span className="text-[var(--color-ink-soft)]">{row.label}</span>
+            <span className="font-semibold">{row.value}</span>
+          </p>
+        ))}
+        {hint ? (
+          <p className="pt-0.5 text-[0.6875rem] leading-snug text-ink-soft">
+            {hint}
+          </p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function MetricsGrid({
+  weather,
+  loading,
+}: {
+  weather: WeatherSnapshot | null;
+  loading: boolean;
+}) {
+  const today = weather?.daily[0];
+  const current = weather?.current;
+
+  return (
+    <div className="grid grid-cols-2 gap-3">
+      <MetricTile
+        icon={<Thermometer className="h-4 w-4" />}
+        label="Temperature"
+        tone="accent"
+        unit="°C"
+        value={
+          current?.temperature === null || current?.temperature === undefined
+            ? "—"
+            : Math.round(current.temperature).toString()
+        }
+        rows={
+          today
+            ? [
+                { label: "Max", value: `${Math.round(today.tempMax)}°` },
+                { label: "Min", value: `${Math.round(today.tempMin)}°` },
+              ]
+            : undefined
+        }
+        loading={loading}
+      />
+      <MetricTile
+        icon={<Droplets className="h-4 w-4" />}
+        label="Humidity"
+        tone="info"
+        unit="%"
+        value={
+          current?.humidity === null || current?.humidity === undefined
+            ? "—"
+            : Math.round(current.humidity).toString()
+        }
+        rows={
+          today
+            ? [
+                {
+                  label: "Rain chance",
+                  value: `${today.precipitationProbability}%`,
+                },
+                {
+                  label: "Rain total",
+                  value: `${(today.precipitationSum ?? 0).toFixed(1)} mm`,
+                },
+              ]
+            : undefined
+        }
+        loading={loading}
+      />
+      <MetricTile
+        icon={<Droplets className="h-4 w-4" />}
+        label="Soil moisture"
+        tone="leaf"
+        unit="%"
+        value={
+          current?.soilMoisture === null || current?.soilMoisture === undefined
+            ? "—"
+            : Math.round(current.soilMoisture * 100).toString()
+        }
+        rows={
+          today
+            ? [
+                {
+                  label: "Rain chance",
+                  value: `${today.precipitationProbability}%`,
+                },
+              ]
+            : undefined
+        }
+        hint="model · top 0–1 cm"
+        loading={loading}
+      />
+      <MetricTile
+        icon={<Wind className="h-4 w-4" />}
+        label="Wind"
+        tone="soil"
+        unit="km/h"
+        value={
+          current?.windSpeed === null || current?.windSpeed === undefined
+            ? "—"
+            : Math.round(current.windSpeed).toString()
+        }
+        rows={
+          today
+            ? [{ label: "Gusts to", value: `${Math.round(today.windSpeedMax ?? 0)}` }]
+            : undefined
+        }
+        loading={loading}
+      />
+    </div>
+  );
+}
+
+function OutlookCard({
+  days,
+  loading,
+}: {
+  days: DailyForecast[];
+  loading: boolean;
+}) {
+  const works = days.map(dayWork);
+  const goodDays = works.filter((work) => work.level === "good").length;
+
+  const verdict = days.length
+    ? goodDays >= 5
+      ? { label: "Good for planting", tone: "text-leaf-700" }
+      : goodDays >= 3
+        ? { label: "Fair for field work", tone: "text-warn-700" }
+        : goodDays >= 1
+          ? { label: "Watch the rain", tone: "text-warn-700" }
+          : { label: "Too wet — check drainage", tone: "text-danger-700" }
+    : { label: loading ? "Awaiting forecast" : "Forecast unavailable", tone: "text-[var(--color-ink-soft)]" };
+
+  return (
+    <section className="card p-5">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Field-work outlook</h2>
+        <span className={`text-xs font-medium ${verdict.tone}`}>
+          {verdict.label}
+        </span>
+      </header>
+
+      {loading ? (
+        <div className="mt-3 h-10 animate-pulse-soft rounded-lg bg-paper-deep" />
+      ) : days.length === 0 ? (
+        <p className="muted mt-3 text-sm leading-relaxed">
+          No forecast is available for this field right now. Weather refreshes
+          automatically — check back shortly.
+        </p>
+      ) : (
+        <>
+          <div
+            className="mt-4 flex h-10 gap-1"
+            role="img"
+            aria-label={`${goodDays} of ${days.length} forecast days look workable`}
+          >
+            {works.map((work, index) => (
+              <span
+                key={days[index].date}
+                title={`${weekday(days[index].date)} · ${work.reason}`}
+                className={`w-full flex-1 rounded-md ${DAY_TONES[work.level].fill}`}
+                aria-hidden
+              />
+            ))}
+          </div>
+          <div className="muted mt-2 flex justify-between text-[0.6875rem] tabular-nums">
+            <span>Today</span>
+            <span>+3d</span>
+            <span>{weekday(days[days.length - 1].date)}</span>
+          </div>
+          <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--card-muted)] px-3 py-3">
+            <p className="text-xs font-medium leading-snug">
+              {goodDays} of {days.length} days look workable
+              <span className="muted mt-1 block text-[0.6875rem] font-normal leading-relaxed">
+                estimate from the 7-day forecast, not a guarantee
+              </span>
+            </p>
+            <span className="chip shrink-0 bg-[var(--color-ink)] text-[#f5f4ef]">
+              <svg viewBox="0 0 16 16" className="h-3 w-3 fill-accent-300" aria-hidden>
+                <path d="M8 0l1.8 5.4L16 8l-6.2 2.6L8 16l-1.8-5.4L0 8l6.2-2.6L8 0z" />
+              </svg>
+              AI Insights
+            </span>
+          </footer>
+        </>
+      )}
+    </section>
+  );
+}
+
+function SoilCard({
+  points,
+  loading,
+}: {
+  points: WeatherSnapshot["hourlySoilMoisture"];
+  loading: boolean;
+}) {
+  const hourLabel = (iso: string) => iso.slice(11, 16);
+  const slice = points.slice(0, 24).filter((point) => point.value !== null);
+  const empty = !loading && slice.length === 0;
+
+  return (
+    <section className="card p-5">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Soil moisture</h2>
+        <span className="chip bg-[var(--card-muted)] text-[var(--color-ink-soft)]">
+          <Gauge className="h-3 w-3" />
+          24h · model
+        </span>
+      </header>
+
+      {loading ? (
+        <div className="mt-4 h-20 animate-pulse-soft rounded-lg bg-paper-deep" />
+      ) : empty ? (
+        <p className="muted mt-3 text-[0.78rem] leading-relaxed">
+          No soil estimate for this location. The value appears once Open-Meteo
+          covers the field&apos;s coordinates.
+        </p>
+      ) : (
+        <>
+          <div
+            className="mt-4 flex h-20 items-end gap-[2px]"
+            role="img"
+            aria-label="Surface soil moisture for the next 24 hours"
+          >
+            {slice.map((point, index) => {
+              const value = point.value ?? 0;
+              const peak = slice.reduce(
+                (max, candidate) => Math.max(max, (candidate.value ?? 0) as number),
+                0,
+              );
+              const height = Math.max(8, Math.round((value / Math.max(0.001, peak)) * 100));
+              return (
+                <span
+                  key={point.time + String(index)}
+                  title={`${hourLabel(point.time)} · ${Math.round(value * 100)}% moisture`}
+                  className={`w-full flex-1 rounded-t-[3px] ${soilTone(value)}`}
+                  style={{ height: `${height}%` }}
+                />
+              );
+            })}
+          </div>
+          <div className="muted mt-2 flex justify-between text-[0.6875rem] tabular-nums">
+            <span>{hourLabel(slice[0].time)}</span>
+            <span>{hourLabel(slice[Math.floor(slice.length / 2)].time)}</span>
+            <span>{hourLabel(slice[slice.length - 1].time)}</span>
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
+function ForecastCard({
+  weather,
+  warnings,
+  loading,
+}: {
+  weather: WeatherSnapshot | null;
+  warnings: WeatherWarning[];
+  loading: boolean;
+}) {
+  const fetchedAt = weather?.fetchedAt
     ? new Date(weather.fetchedAt).toLocaleTimeString(undefined, {
         hour: "2-digit",
         minute: "2-digit",
@@ -203,221 +707,123 @@ export function DashboardView() {
     : null;
 
   return (
-    <div className="w-full px-4 pb-4 pt-4 sm:px-6 sm:pt-4">
-      <header className="flex flex-wrap items-end justify-between gap-4 pb-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight sm:text-3xl">
-            {farmer ? `Welcome, ${farmer.name}` : "Farm dashboard"}
-          </h1>
-          <p className="muted mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm">
-            {hasFarms ? (
-              <>
-                <span className="inline-flex items-center gap-1.5 font-medium text-[var(--foreground)]">
-                  <MapPin className="h-3.5 w-3.5 text-brand-600 dark:text-brand-400" />
-                  {selectedFarm?.name}
-                </span>
-                <span aria-hidden className="opacity-40">
-                  ·
-                </span>
-                <span>
-                  {farms.length} {farms.length === 1 ? "field" : "fields"} ·{" "}
-                  {formatAcres(totalAcres)}
-                </span>
-                {liveCamera?.isLive ? (
-                  <>
-                    <span aria-hidden className="opacity-40">
-                      ·
-                    </span>
-                    <span className="inline-flex items-center gap-1.5 font-semibold text-danger-700 dark:text-red-400">
-                      <Camera className="h-3.5 w-3.5" />
-                      {liveCamera.name} live
-                    </span>
-                  </>
-                ) : null}
-                {liveAt ? (
-                  <>
-                    <span aria-hidden className="opacity-40">
-                      ·
-                    </span>
-                    <span className="tabular-nums">Updated {liveAt}</span>
-                  </>
-                ) : null}
-              </>
-            ) : (
-              "Map your first field to unlock live weather and weekly advice."
-            )}
-          </p>
-        </div>
-
-        {hasFarms ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {liveCamera?.isLive ? (
-              <span className="chip chip-danger">
-                <Camera className="h-3.5 w-3.5" />
-                Camera live
-              </span>
-            ) : null}
-            <Link href="/watch" className="btn btn-secondary">
-              <Video className="h-4 w-4" />
-              Live watch
-            </Link>
-            <Link href="/map" className="btn btn-secondary">
-              <MapIcon className="h-4 w-4" />
-              Manage fields
-            </Link>
-          </div>
+    <section className="card p-5">
+      <header className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">Weather forecast</h2>
+        {fetchedAt ? (
+          <span className="muted text-[0.6875rem] tabular-nums">
+            live · {fetchedAt}
+          </span>
         ) : null}
       </header>
 
-      <CameraAlarmBanner className="mb-4" intervalMs={6_000} />
-
-      {needsSetup || notice ? (
-        <div className="space-y-3 pb-4">
-          {needsSetup ? <SetupNotice showDatabase /> : null}
-
-          {notice ? <Callout tone="info">{notice}</Callout> : null}
+      {loading ? (
+        <div className="mt-3 space-y-1.5">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="h-8 animate-pulse-soft rounded-lg bg-paper-deep"
+            />
+          ))}
         </div>
-      ) : null}
-
-      {farmsLoading && !hasFarms ? (
-        <section
-          aria-hidden
-          className="grid gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]"
-        >
-          <div className="h-[60vh] min-h-[400px] animate-pulse-soft rounded-2xl bg-black/5 dark:bg-white/5 lg:sticky lg:top-20 lg:h-[calc(100dvh-6rem)]" />
-          <div className="space-y-4">
-            <div className="card h-[420px] animate-pulse-soft" />
-            <div className="card h-56 animate-pulse-soft" />
-          </div>
-        </section>
-      ) : !hasFarms ? (
-        <div className="pb-4">
-          <EmptyState
-            className="mx-auto max-w-2xl"
-            icon={<MapIcon className="h-7 w-7" />}
-            title="Map your farmland first"
-            description="Draw your field boundary on the satellite map. We use its centre for hyper-local weather and to warn you when wildlife is nearby."
-            action={
-              <Link href="/map" className="btn btn-primary">
-                <MapIcon className="h-4 w-4" />
-                Open farm map
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            }
-          />
-        </div>
+      ) : !weather ? (
+        <p className="muted mt-3 text-[0.78rem] leading-relaxed">
+          Could not load live weather for this field right now. It refreshes on
+          its own — check back shortly.
+        </p>
       ) : (
-        <section
-          aria-label="Farm overview"
-          className="grid items-start gap-4 lg:grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)]"
-        >
-          {/* Left panel — satellite view */}
-          <div className="relative h-[60vh] min-h-[400px] lg:sticky lg:top-20 lg:h-[calc(100dvh-6rem)]">
-            <FarmMap
-              farms={farms}
-              selectedFarm={selectedFarm}
-              cameras={cameras}
-              onSelectFarm={setFarmId}
-              onRefresh={() => void refresh()}
-              refreshing={farmsLoading}
-            />
-          </div>
-
-          {/* Right column — live camera, weather, then the farm guide */}
-          <div className="flex flex-col gap-4">
-            <LiveWatchCard session={liveCamera} loading={camerasLoading} />
-
-            <WeatherCard
-              weather={weather}
-              warnings={warnings}
-              farmName={selectedFarm?.name}
-              loading={weatherLoading}
-            />
-
-            <PestSirenCard
-              key={activeCrop?.id ?? "no-crop"}
-              cropId={activeCrop?.id ?? null}
-              farmName={selectedFarm?.name}
-            />
-
-            {cropsLoading ? (
-              <div className="card h-48 animate-pulse-soft" />
-            ) : activeCrop ? (
-              <CropDayGuide crop={activeCrop} />
-            ) : (
-              <section className="card p-4 sm:p-5">
-                <h2 className="text-base font-semibold">Crop day guide</h2>
-                <p className="muted mt-1 text-sm">
-                  Add a crop with its sowing date to see the day-by-day guide.
-                </p>
-                <Link href="/crops" className="btn btn-secondary mt-3">
-                  <Sprout className="h-4 w-4" />
-                  Add a crop
-                  <ArrowRight className="h-4 w-4" />
-                </Link>
-              </section>
-            )}
-
-            <section className="card flex flex-1 flex-col gap-4 p-4 sm:p-5">
-              <header className="flex flex-wrap items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
-                    <Sparkles className="h-[1.15rem] w-[1.15rem]" />
-                  </span>
-                  <div>
-                    <h2 className="text-base font-semibold leading-tight">
-                      Guide for our farm
-                    </h2>
-                    <p className="muted mt-0.5 text-xs">
-                      AI advice built from your crop age and the 7-day forecast
-                    </p>
-                  </div>
-                </div>
-                <Button
-                  variant="secondary"
-                  onClick={handleGenerate}
-                  loading={generating}
+        <>
+          {warnings.length > 0 ? (
+            <ul className="mt-2.5 space-y-1.5">
+              {warnings.slice(0, 3).map((warning) => (
+                <li
+                  key={warning.title}
+                  title={warning.detail}
+                  className="flex items-start gap-1.5 rounded-lg bg-[var(--card-muted)] px-2.5 py-2 text-[0.74rem]"
                 >
-                  <RefreshCw className="h-4 w-4" />
-                  Generate now
-                </Button>
-              </header>
+                  <TriangleAlert
+                    className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${
+                      warning.level === "danger"
+                        ? "text-danger-600"
+                        : "text-warn-600"
+                    }`}
+                  />
+                  <span>
+                    <span className="font-semibold">{warning.title}</span>
+                    <span className="muted block text-[0.68rem] leading-snug">
+                      {warning.detail}
+                    </span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="muted mt-2 flex items-center gap-1.5 text-[0.72rem]">
+              <span className="h-1.5 w-1.5 rounded-full bg-leaf-500" />
+              No rain, wind or heat warnings for the next 3 days
+            </p>
+          )}
 
-              <div className="flex flex-1 flex-col gap-3">
-                {reportsLoading ? (
-                  <div className="card-muted h-32 animate-pulse-soft rounded-xl" />
-                ) : reports.length > 0 ? (
-                  <div className="flex flex-1 flex-col gap-5 border-t border-[var(--border)] pt-4">
-                    {reports.map((report) => (
-                      <ReportCard key={report.id} report={report} embedded />
-                    ))}
-                  </div>
-                ) : (
-                  <div className="flex flex-1 flex-col items-center justify-center gap-2.5 rounded-xl border border-dashed border-[var(--border)] bg-[var(--card-muted)]/60 px-5 py-8 text-center">
-                    <Sparkles className="h-6 w-6 text-brand-600 dark:text-brand-400" />
-                    <p className="text-sm font-semibold">No advisory yet</p>
-                    <p className="muted max-w-xs text-xs leading-relaxed">
-                      Add a crop with its sowing date, then generate this
-                      week&apos;s action plan.
-                    </p>
-                    <Link href="/crops" className="btn btn-primary mt-1">
-                      <Sprout className="h-4 w-4" />
-                      Add a crop
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </div>
-                )}
-              </div>
-
-              {reports[0] ? (
-                <p className="muted text-xs">
-                  Latest advisory generated {formatRelative(reports[0].createdAt)}
-                </p>
-              ) : null}
-            </section>
-          </div>
-        </section>
+          <ul className="mt-2.5 space-y-0.5">
+            {weather.daily.slice(0, 7).map((day, index) => {
+              const work = dayWork(day);
+              return (
+                <li
+                  key={day.date}
+                  className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-[0.78rem] hover:bg-[var(--card-muted)]"
+                >
+                  <span className="w-9 shrink-0 font-semibold">
+                    {index === 0 ? "Today" : weekday(day.date)}
+                  </span>
+                  <span
+                    className={`h-4 w-1 shrink-0 rounded-full ${DAY_TONES[work.level].fill}`}
+                    title={work.reason}
+                  />
+                  <span className="flex-1 truncate tabular-nums">
+                    <span className="font-semibold">
+                      {Math.round(day.tempMax)}°
+                    </span>
+                    <span className="muted">
+                      {" "}
+                      / {Math.round(day.tempMin)}°
+                    </span>
+                  </span>
+                  <span className="muted flex shrink-0 items-center gap-1 tabular-nums text-[0.7rem]">
+                    <Droplets className="h-3 w-3" />
+                    {day.precipitationProbability}%
+                  </span>
+                  <span className="muted hidden shrink-0 items-center gap-1 tabular-nums text-[0.7rem] sm:flex">
+                    <Wind className="h-3 w-3" />
+                    {Math.round(day.windSpeedMax)}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </>
       )}
+    </section>
+  );
+}
+
+function DashboardSkeleton() {
+  return (
+    <div className="space-y-4 px-4 pt-5 sm:px-6">
+      <div className="flex items-center justify-between gap-3">
+        <div className="h-10 w-56 animate-pulse-soft rounded-full bg-paper-deep" />
+        <div className="h-10 w-64 animate-pulse-soft rounded-full bg-paper-deep" />
+      </div>
+      <div className="grid gap-4 lg:grid-cols-[23.5rem_1fr]">
+        <div className="space-y-3">
+          {Array.from({ length: 4 }).map((_, index) => (
+            <div
+              key={index}
+              className="card h-28 animate-pulse-soft"
+            />
+          ))}
+        </div>
+        <div className="h-[60vh] animate-pulse-soft rounded-2xl bg-paper-deep" />
+      </div>
     </div>
   );
 }

@@ -114,7 +114,7 @@ async function readCropId(request: NextRequest): Promise<number | undefined> {
 async function generateReports(cropId?: number, farmerId?: number) {
   const db = getDb();
 
-  const targets: Array<{ cropId: number; cropName: string; growthStage: string; ageDays: number; sowingDate: string; farm: Farmland }> = [];
+  const targets: Array<{ cropId: number; cropName: string; growthStage: string; ageDays: number; sowingDate: string; durationDays: number | null; farm: Farmland }> = [];
 
   if (cropId !== undefined) {
     const row = await getCropWithFarm(db, cropId, farmerId);
@@ -135,6 +135,7 @@ async function generateReports(cropId?: number, farmerId?: number) {
       growthStage: row.crop.growthStage ?? "Seedling",
       ageDays: dto.ageDays,
       sowingDate: dto.sowingDate.slice(0, 10),
+      durationDays: row.crop.durationDays ?? null,
       farm: row.farm,
     });
   } else {
@@ -148,6 +149,7 @@ async function generateReports(cropId?: number, farmerId?: number) {
         growthStage: row.crop.growthStage ?? "Seedling",
         ageDays: dto.ageDays,
         sowingDate: dto.sowingDate.slice(0, 10),
+        durationDays: row.crop.durationDays ?? null,
         farm: row.farm,
       });
     }
@@ -174,6 +176,7 @@ async function generateReports(cropId?: number, farmerId?: number) {
       growthStage: target.growthStage,
       ageDays: target.ageDays,
       sowingDate: target.sowingDate,
+      durationDays: target.durationDays,
       weather,
     });
 

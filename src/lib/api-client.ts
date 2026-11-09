@@ -12,6 +12,7 @@ import type {
   CameraIngestResponse,
   CameraSessionDTO,
 } from "./camera";
+import type { GeocodeResponse } from "./geocode";
 import type { PestRiskAssessment } from "./pest-risk";
 import type { WeatherSnapshot, WeatherWarning } from "./weather";
 
@@ -99,6 +100,14 @@ export const api = {
     request<{ signedOut: boolean }>("/api/auth/logout", { method: "POST" }),
 
   listFarms: () => request<{ farms: FarmDTO[] }>("/api/farms"),
+
+  /** Village / town lookup (Photon + OpenStreetMap). */
+  searchPlaces: (query: string, options?: { signal?: AbortSignal }) => {
+    const params = new URLSearchParams({ q: query });
+    return request<GeocodeResponse>(`/api/geocode?${params.toString()}`, {
+      signal: options?.signal,
+    });
+  },
 
   listAvailableFarms: () =>
     request<{ farms: FarmDTO[] }>("/api/farms/available"),

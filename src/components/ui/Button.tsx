@@ -26,6 +26,7 @@ export function Button({
       type={type}
       className={cn("btn", `btn-${variant}`, className)}
       disabled={disabled || loading}
+      aria-busy={loading || undefined}
       {...rest}
     >
       {loading ? <Spinner /> : null}

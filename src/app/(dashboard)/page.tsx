@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 
 export const metadata: Metadata = {
-  title: "Dashboard",
+  title: "My farm",
 };
 
 export default function DashboardPage() {

@@ -43,7 +43,7 @@ export function LoginForm() {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
       {error ? (
         <Callout tone="danger" icon={<TriangleAlert className="h-4 w-4" />}>
           {error}
@@ -51,16 +51,16 @@ export function LoginForm() {
       ) : null}
 
       <label className="block">
-        <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+        <span className="mb-2 block text-sm font-medium">
           Your name
         </span>
-        <div className="relative mt-1.5">
+        <div className="relative">
           <UserRound
             aria-hidden
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-ink-soft"
           />
           <input
-            className="input pl-10"
+            className="input pl-11"
             value={name}
             onChange={(event) => setName(event.target.value)}
             placeholder="Ramesh Patel"
@@ -72,16 +72,16 @@ export function LoginForm() {
       </label>
 
       <label className="block">
-        <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+        <span className="mb-2 block text-sm font-medium">
           PIN
         </span>
-        <div className="relative mt-1.5">
+        <div className="relative">
           <KeyRound
             aria-hidden
-            className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]"
+            className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-ink-soft"
           />
           <input
-            className="input pl-10 pr-12"
+            className="input pl-11 pr-12"
             type={showPin ? "text" : "password"}
             value={pin}
             onChange={(event) => setPin(event.target.value)}
@@ -92,22 +92,23 @@ export function LoginForm() {
           <button
             type="button"
             onClick={() => setShowPin((current) => !current)}
-            className="absolute right-1 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-lg text-[var(--muted)] transition-colors hover:bg-black/5 hover:text-[var(--foreground)] dark:hover:bg-white/10"
+            className="icon-btn absolute right-1 top-1/2 -translate-y-1/2 border-transparent bg-transparent text-ink-soft"
             aria-label={showPin ? "Hide PIN" : "Show PIN"}
+            aria-pressed={showPin}
           >
             {showPin ? <EyeOff aria-hidden className="h-4 w-4" /> : <Eye aria-hidden className="h-4 w-4" />}
           </button>
         </div>
       </label>
 
-      <Button type="submit" loading={loading} className="w-full">
-        Sign in to my farm
+      <Button type="submit" loading={loading} className="min-h-12 w-full">
+        Open my farm
         <ArrowRight aria-hidden className="h-4 w-4" />
       </Button>
 
-      <p className="muted text-center text-sm">
-        New here?{" "}
-        <Link href="/onboarding" className="font-semibold text-brand-700 underline dark:text-brand-400">
+      <p className="muted flex flex-col items-center justify-center text-center text-sm font-medium sm:flex-row sm:gap-1">
+        <span>New here?</span>
+        <Link href="/onboarding" className="inline-flex min-h-11 items-center justify-center whitespace-nowrap font-semibold text-accent-700 underline decoration-accent-300 underline-offset-4 hover:decoration-accent-700">
           Create your farm account
         </Link>
       </p>

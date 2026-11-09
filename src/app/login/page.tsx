@@ -1,85 +1,108 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CloudSun, Leaf, ShieldCheck, Sprout } from "lucide-react";
+import { Leaf, Radar, Satellite, Sprout } from "lucide-react";
 
 import { LoginForm } from "@/components/auth/LoginForm";
 
 export const metadata: Metadata = {
-  title: "Sign in",
+  title: "Welcome back",
 };
+
+const HIGHLIGHTS = [
+  {
+    icon: Satellite,
+    title: "Map and monitor your land",
+    body: "Trace field boundaries on satellite imagery and track live phone cameras across the plot.",
+  },
+  {
+    icon: Radar,
+    title: "Watch for animals and people",
+    body: "A spare phone becomes your field camera — on-device alerts the moment something moves.",
+  },
+  {
+    icon: Sprout,
+    title: "Care at the right moment",
+    body: "Growth-stage guidance and hyper-local weather distilled into a short weekly plan.",
+  },
+];
 
 export default function LoginPage() {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-5xl items-center px-4 py-8 sm:px-6">
-      <div className="card grid w-full overflow-hidden lg:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)]">
-        <section className="relative hidden flex-col justify-between gap-10 bg-brand-800 p-8 text-white lg:flex">
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -right-12 top-10 h-48 w-48 rounded-full bg-white/10"
-          />
-          <div
-            aria-hidden
-            className="pointer-events-none absolute -bottom-16 -left-10 h-56 w-56 rounded-full bg-brand-500/20"
-          />
-
-          <Link href="/" className="relative flex items-center gap-2.5 font-semibold">
-            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15">
-              <Leaf className="h-5 w-5" strokeWidth={2.4} />
-            </span>
-            <span className="text-2xl tracking-tight">
-              Agro<span className="text-brand-200">AI</span>
-            </span>
-          </Link>
-
-          <div className="relative space-y-5">
-            <h1 className="text-3xl font-semibold leading-tight tracking-tight">
-              Your farm, your weather, your crop — in one place.
-            </h1>
-            <ul className="space-y-3.5 text-sm text-white/85">
-              <li className="flex items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-                  <CloudSun aria-hidden className="h-4 w-4" />
-                </span>
-                Live 7-day forecast for your exact field centre.
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-                  <Sprout aria-hidden className="h-4 w-4" />
-                </span>
-                Day-by-day crop guide built from your sowing date.
-              </li>
-              <li className="flex items-center gap-3">
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/10 ring-1 ring-white/15">
-                  <ShieldCheck aria-hidden className="h-4 w-4" />
-                </span>
-                Pest risk siren that reads the crop stage and weather.
-              </li>
-            </ul>
+    <main className="auth-page p-4 sm:p-6 lg:p-8">
+      <div className="auth-frame grid w-full overflow-hidden lg:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]">
+        {/* Branding panel (desktop) */}
+        <section className="auth-brand hidden flex-col justify-between p-10 lg:flex">
+          <div>
+            <Link href="/" className="inline-flex items-center gap-2.5">
+              <span className="brand-mark h-11 w-11">
+                <Leaf className="h-5 w-5" strokeWidth={2.4} />
+              </span>
+              <span className="text-lg font-semibold tracking-tight">
+                AgroAI
+              </span>
+            </Link>
+            <h2 className="mt-12 text-[2rem] font-medium leading-[1.2]">
+              The field workstation for your farm.
+            </h2>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-leaf-100/85">
+              One calm screen for boundaries, cameras, weather and crop care —
+              built for real work in the field, on weak connections.
+            </p>
           </div>
 
-          <p className="relative text-xs text-white/60">
-            Sign in with the name and PIN you created during onboarding.
+          <ul className="mt-10 space-y-6">
+            {HIGHLIGHTS.map((item) => (
+              <li key={item.title} className="flex items-start gap-3">
+                <span className="mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10 text-leaf-300">
+                  <item.icon className="h-4 w-4" strokeWidth={2.2} />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">{item.title}</p>
+                  <p className="mt-1.5 text-xs leading-relaxed text-leaf-100/85">
+                    {item.body}
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <p className="mt-10 border-t border-white/10 pt-5 text-xs leading-relaxed text-leaf-300">
+            Field data stays yours · on-device camera detection · free-first
+            infrastructure
           </p>
         </section>
 
-        <section className="p-6 sm:p-8">
-          <div className="mb-6 flex items-center gap-2.5 lg:hidden">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-700 text-white">
-              <Leaf className="h-5 w-5" strokeWidth={2.4} />
-            </span>
-            <span className="text-xl font-semibold tracking-tight">
-              Agro<span className="text-brand-700 dark:text-brand-400">AI</span>
-            </span>
+        {/* Form panel */}
+        <section className="flex flex-col justify-center p-6 sm:p-8 lg:p-10">
+          <div className="lg:hidden">
+            <Link href="/" className="inline-flex min-h-11 items-center gap-2">
+              <span className="brand-mark h-10 w-10">
+                <Leaf className="h-4 w-4" strokeWidth={2.4} />
+              </span>
+              <span className="text-[1.05rem] font-semibold tracking-tight">
+                AgroAI
+              </span>
+            </Link>
           </div>
 
-          <h2 className="text-2xl font-semibold tracking-tight">Welcome back</h2>
-          <p className="muted mt-1.5 text-sm">
-            Sign in with your name and PIN to see your farm dashboard.
-          </p>
+          <div className="mt-8 lg:mt-0">
+            <h1 className="text-2xl font-semibold leading-tight">
+              Sign in to your farm
+            </h1>
+            <p className="muted mt-3 text-sm leading-relaxed">
+              Use the name and PIN you set when the workstation was first
+              prepared.
+            </p>
+          </div>
 
-          <div className="mt-6">
+          <div className="auth-form mt-7">
             <LoginForm />
           </div>
+
+          <p className="muted mt-7 border-t border-[var(--color-line)] pt-5 text-xs leading-relaxed">
+            New to AgroAI? Signing in with a new name creates a fresh farm
+            record on this device.
+          </p>
         </section>
       </div>
     </main>

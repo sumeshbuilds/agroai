@@ -6,20 +6,23 @@ import { useMemo, useRef, useState } from "react";
 import type { Map as LeafletMap } from "leaflet";
 import {
   CircleMarker,
-  MapContainer,
   Polygon,
   Polyline,
   TileLayer,
   Tooltip,
   useMapEvents,
+  ZoomControl,
 } from "react-leaflet";
 import { Crosshair, Ruler, Save, Trash2, Undo2 } from "lucide-react";
 
+import { LeafletMapContainer } from "@/components/map/LeafletMapContainer";
+import { LocationSearch } from "@/components/map/LocationSearch";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
 import { formatLandArea } from "@/lib/format";
+import type { GeocodePlace } from "@/lib/geocode";
 import { polygonAreaAcres, polygonCentroid } from "@/lib/geo";
 import {
   DEFAULT_CENTER,
@@ -30,11 +33,7 @@ import {
 } from "@/lib/map";
 import type { FarmDTO, GeoPoint } from "@/lib/types";
 
-function DrawEvents({
-  onPoint,
-}: {
-  onPoint: (point: GeoPoint) => void;
-}) {
+function DrawEvents({ onPoint }: { onPoint: (point: GeoPoint) => void }) {
   useMapEvents({
     click(event) {
       onPoint([event.latlng.lat, event.latlng.lng]);
@@ -55,6 +54,7 @@ export function MapDrawer({
   const mapRef = useRef<LeafletMap | null>(null);
   const [points, setPoints] = useState<GeoPoint[]>([]);
   const [name, setName] = useState("");
+  const [searchTarget, setSearchTarget] = useState<GeocodePlace | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -63,7 +63,9 @@ export function MapDrawer({
       farms[0]
         ? [farms[0].centroidLat, farms[0].centroidLng]
         : DEFAULT_CENTER,
-    [farms],
+    // Centres only on mount; Leaflet owns movement afterwards.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [farms[0]],
   );
 
   const initialZoom = farms[0] ? FARM_ZOOM : DEFAULT_ZOOM;
@@ -88,7 +90,10 @@ export function MapDrawer({
         mapRef.current?.flyTo(
           [position.coords.latitude, position.coords.longitude],
           16,
-          { duration: 1.2 },
+          {
+            animate: !window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+            duration: 0.25,
+          },
         );
       },
       () =>
@@ -130,172 +135,214 @@ export function MapDrawer({
   const hasPolygon = points.length >= 3;
 
   return (
-    <div className="space-y-3">
-      <div className="card space-y-3 p-3 sm:p-4">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
-          <label className="flex-1">
-            <span className="muted text-xs font-semibold">Farm name</span>
-            <input
-              className="input mt-1"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              placeholder="e.g. North Paddy Field"
-              maxLength={80}
-            />
-          </label>
+    <div className="relative flex h-full min-h-[36rem] w-full flex-col overflow-hidden rounded-2xl bg-paper-deep sm:min-h-[28rem]">
+      <LocationSearch
+        mapRef={mapRef}
+        onSelect={(place) => setSearchTarget(place)}
+        className="order-first mb-3 shrink-0 lg:absolute lg:right-4 lg:top-4 lg:z-[520] lg:mb-0 lg:w-[23rem]"
+      />
 
-          <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={handleLocate}>
-              <Crosshair className="h-4 w-4" />
-              Locate me
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => setPoints((current) => current.slice(0, -1))}
-              disabled={points.length === 0}
-            >
-              <Undo2 className="h-4 w-4" />
-              Undo
-            </Button>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setPoints([]);
-                setError(null);
-              }}
-              disabled={points.length === 0}
-            >
-              <Trash2 className="h-4 w-4" />
-              Clear
-            </Button>
-            <Button onClick={handleSave} loading={saving}>
-              <Save className="h-4 w-4" />
-              Save farm
-            </Button>
-          </div>
-        </div>
+      <LeafletMapContainer
+        ref={mapRef}
+        center={initialCenter}
+        zoom={initialZoom}
+        scrollWheelZoom
+        zoomControl={false}
+        className="order-2 min-h-[24rem] w-full flex-1 sm:order-none lg:h-full"
+      >
+        <DrawEvents onPoint={addPoint} />
+        <ZoomControl position="bottomright" />
 
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="chip chip-brand">
-            <Ruler className="h-3.5 w-3.5" />
-            {formatLandArea(area)}
-          </span>
-          <span className="muted text-xs">
-            {points.length} corner{points.length === 1 ? "" : "s"} · tap the map
-            to outline your field
-          </span>
-        </div>
+        <TileLayer
+          url={ESRI_WORLD_IMAGERY_URL}
+          attribution={ESRI_ATTRIBUTION}
+          maxZoom={19}
+        />
 
-        {error ? <Callout tone="danger">{error}</Callout> : null}
-      </div>
-
-      <div className="relative h-[58vh] min-h-[360px] overflow-hidden rounded-2xl border border-[var(--border)]">
-        <MapContainer
-          ref={mapRef}
-          center={initialCenter}
-          zoom={initialZoom}
-          scrollWheelZoom
-          className="h-full w-full"
-        >
-          <DrawEvents onPoint={addPoint} />
-
-          <TileLayer
-            url={ESRI_WORLD_IMAGERY_URL}
-            attribution={ESRI_ATTRIBUTION}
-            maxZoom={19}
+        {farms.map((farm) => (
+          <Polygon
+            key={farm.id}
+            positions={farm.points}
+            interactive={false}
+            pathOptions={{
+              color: "#ffffff",
+              weight: 2,
+              dashArray: "6 6",
+               fillColor: "#638650",
+              fillOpacity: 0.2,
+            }}
           />
+        ))}
 
-          {farms.map((farm) => (
-            <Polygon
-              key={farm.id}
-              positions={farm.points}
-              interactive={false}
-              pathOptions={{
-                color: "#34d399",
-                weight: 2,
-                dashArray: "6 6",
-                fillColor: "#34d399",
-                fillOpacity: 0.06,
-              }}
-            />
-          ))}
-
-          {cameras
-            .filter(
-              (camera) => camera.lat !== null && camera.lng !== null,
-            )
-            .map((camera) => (
-              <CircleMarker
-                key={`camera-${camera.id}`}
-                center={[camera.lat!, camera.lng!]}
-                radius={camera.isLive ? 10 : 7}
-                pathOptions={{
-                  color: "#ffffff",
-                  weight: 2,
-                  fillColor: camera.isLive ? "#0ea5e9" : "#64748b",
-                  fillOpacity: 0.95,
-                }}
-              >
-                <Tooltip>
-                  📷 {camera.name} · {camera.isLive ? "LIVE" : camera.status}
-                </Tooltip>
-              </CircleMarker>
-            ))}
-
-          {points.length === 2 ? (
-            <Polyline
-              positions={points}
-              pathOptions={{ color: "#facc15", weight: 3 }}
-            />
-          ) : null}
-
-          {hasPolygon ? (
-            <Polygon
-              positions={points}
-              pathOptions={{
-                color: "#facc15",
-                weight: 3,
-                fillColor: "#facc15",
-                fillOpacity: 0.2,
-              }}
-            />
-          ) : null}
-
-          {points.map((point, index) => (
+        {cameras
+          .filter((camera) => camera.lat !== null && camera.lng !== null)
+          .map((camera) => (
             <CircleMarker
-              key={`${point[0]}-${point[1]}-${index}`}
-              center={point}
-              radius={7}
-              pathOptions={{
-                color: "#1f2937",
-                weight: 2,
-                fillColor: "#ffffff",
-                fillOpacity: 1,
-              }}
-            >
-              <Tooltip permanent direction="top" offset={[0, -6]}>
-                {index + 1}
-              </Tooltip>
-            </CircleMarker>
-          ))}
-
-          {hasPolygon ? (
-            <CircleMarker
-              center={[centroid.lat, centroid.lng]}
-              radius={6}
+              key={`camera-${camera.id}`}
+              center={[camera.lat!, camera.lng!]}
+              radius={camera.isLive ? 10 : 7}
               pathOptions={{
                 color: "#ffffff",
                 weight: 2,
-                fillColor: "#ef4444",
-                fillOpacity: 1,
+                fillColor: camera.isLive ? "#bf4540" : "#606b60",
+                fillOpacity: 0.95,
               }}
             >
-              <Tooltip direction="top" offset={[0, -6]}>
-                Centre · {area.toFixed(2)} acres
+              <Tooltip>
+                {camera.name} · {camera.isLive ? "LIVE" : camera.status}
               </Tooltip>
             </CircleMarker>
-          ) : null}
-        </MapContainer>
+          ))}
+
+        {searchTarget ? (
+          <CircleMarker
+            center={[searchTarget.lat, searchTarget.lng]}
+            radius={9}
+            pathOptions={{
+              color: "#ffffff",
+              weight: 3,
+              fillColor: "#b6532e",
+              fillOpacity: 1,
+            }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              {searchTarget.name}
+            </Tooltip>
+          </CircleMarker>
+        ) : null}
+
+        {points.length === 2 ? (
+          <Polyline
+            positions={points}
+            pathOptions={{ color: "#e2ae8f", weight: 3 }}
+          />
+        ) : null}
+
+        {hasPolygon ? (
+          <Polygon
+            positions={points}
+            pathOptions={{
+              color: "#e2ae8f",
+              weight: 3,
+              fillColor: "#b6532e",
+              fillOpacity: 0.22,
+            }}
+          />
+        ) : null}
+
+        {points.map((point, index) => (
+          <CircleMarker
+            key={`${point[0]}-${point[1]}-${index}`}
+            center={point}
+            radius={7}
+            pathOptions={{
+              color: "#22362a",
+              weight: 2,
+              fillColor: "#ffffff",
+              fillOpacity: 1,
+            }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -6]}>
+              {index + 1}
+            </Tooltip>
+          </CircleMarker>
+        ))}
+
+        {hasPolygon ? (
+          <CircleMarker
+            center={[centroid.lat, centroid.lng]}
+            radius={6}
+            pathOptions={{
+              color: "#ffffff",
+              weight: 2,
+              fillColor: "#b6532e",
+              fillOpacity: 1,
+            }}
+          >
+            <Tooltip direction="top" offset={[0, -6]}>
+              Centre · {area.toFixed(2)} acres
+            </Tooltip>
+          </CircleMarker>
+        ) : null}
+      </LeafletMapContainer>
+
+      {/* Floating drawing toolbar */}
+      <div className="map-panel order-1 shrink-0 rounded-none bg-card p-4 shadow-none sm:absolute sm:left-4 sm:top-4 sm:z-[500] sm:w-[23rem] sm:rounded-2xl sm:bg-card/95 sm:shadow-[var(--shadow-floating)]">
+
+        <label className="block">
+          <span className="text-sm font-medium">
+            Farm name
+          </span>
+          <input
+            className="input mt-2"
+            value={name}
+            onChange={(event) => setName(event.target.value)}
+            placeholder="e.g. North Paddy Field"
+            maxLength={80}
+          />
+        </label>
+
+        <div className="mt-3 grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+          <Button
+            variant="secondary"
+            onClick={handleLocate}
+          >
+            <Crosshair aria-hidden className="h-4 w-4" />
+            Locate me
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => setPoints((current) => current.slice(0, -1))}
+            disabled={points.length === 0}
+          >
+            <Undo2 aria-hidden className="h-4 w-4" />
+            Undo
+          </Button>
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setPoints([]);
+              setError(null);
+            }}
+            disabled={points.length === 0}
+          >
+            <Trash2 aria-hidden className="h-4 w-4" />
+            Clear
+          </Button>
+          <Button
+            onClick={() => void handleSave()}
+            disabled={!hasPolygon}
+            loading={saving}
+          >
+            <Save aria-hidden className="h-4 w-4" />
+            Save farm
+          </Button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2 text-xs leading-relaxed">
+          <span className="chip chip-brand">
+            <Ruler className="h-3 w-3" />
+            {formatLandArea(area)}
+          </span>
+          <span className="muted">
+            {points.length} corner{points.length === 1 ? "" : "s"} · tap the map
+            to trace the boundary
+          </span>
+        </div>
+
+        {error ? (
+          <div className="mt-2.5">
+            <Callout tone="danger">{error}</Callout>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="pointer-events-none absolute bottom-6 left-3 right-16 z-[500] flex justify-center sm:left-4 sm:right-20">
+        <span className="map-chip map-hint">
+          {farms.length > 0
+            ? `${farms.length} saved field${farms.length === 1 ? "" : "s"} mapped on this account`
+            : "Trace at least 3 corners, name the field, save"}
+        </span>
       </div>
     </div>
   );

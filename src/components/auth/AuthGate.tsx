@@ -42,16 +42,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   if (!farmer) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-4 px-4">
-        <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-brand-700 text-white shadow-sm">
+      <div role="status" className="flex min-h-dvh flex-col items-center justify-center gap-5 px-4">
+        <span aria-hidden className="animate-pulse-soft flex h-12 w-12 items-center justify-center rounded-2xl bg-rail text-card">
           <Leaf className="h-6 w-6" strokeWidth={2.4} />
         </span>
         <div className="text-center">
-          <p className="font-semibold">Checking your session…</p>
-          <p className="muted mt-1 text-sm">One moment while we load your farm.</p>
-        </div>
-        <div className="h-1.5 w-40 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
-          <div className="h-full w-1/2 animate-pulse-soft rounded-full bg-brand-600" />
+          <p className="text-lg font-semibold">Checking your session…</p>
+          <p className="muted mt-1 text-sm font-medium">One moment while we load your farm.</p>
         </div>
       </div>
     );

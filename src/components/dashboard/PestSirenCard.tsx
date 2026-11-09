@@ -24,31 +24,27 @@ import { PEST_LEVEL_META, type PestRiskAssessment, type PestRiskLevel } from "@/
 
 const LEVEL_STYLES: Record<
   PestRiskLevel,
-  { card: string; badge: string; bar: string; icon: string }
+  { badge: string; bar: string; icon: string }
 > = {
   low: {
-    card: "border-brand-500/30",
-    badge: "chip-brand",
-    bar: "bg-brand-500",
-    icon: "bg-brand-50 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300",
+    badge: "chip-lime",
+    bar: "bg-meadow-500",
+    icon: "bg-meadow-100 text-meadow-700",
   },
   moderate: {
-    card: "border-warn-500/40",
     badge: "chip-warn",
-    bar: "bg-warn-500",
-    icon: "bg-warn-100 text-warn-700 dark:bg-warn-500/15 dark:text-amber-300",
+    bar: "bg-mustard-500",
+    icon: "bg-mustard-100 text-mustard-600",
   },
   high: {
-    card: "border-danger-500/50",
     badge: "chip-danger",
     bar: "bg-danger-500",
-    icon: "bg-danger-100 text-danger-700 dark:bg-danger-500/15 dark:text-red-300",
+    icon: "bg-danger-100 text-danger-700",
   },
   critical: {
-    card: "border-danger-600",
     badge: "chip-danger",
     bar: "bg-danger-600",
-    icon: "bg-danger-100 text-danger-700 dark:bg-danger-500/20 dark:text-red-300",
+    icon: "bg-danger-100 text-danger-700",
   },
 };
 
@@ -135,9 +131,9 @@ export function PestSirenCard({
 
   if (cropId === null) {
     return (
-      <section className="card p-4 sm:p-5">
-        <h2 className="text-base font-semibold">Pest siren</h2>
-        <p className="muted mt-1 text-sm">
+      <section className="card p-5 sm:p-6">
+        <h2 className="text-lg font-semibold leading-snug">Pest siren</h2>
+        <p className="muted mt-2 text-sm leading-relaxed">
           Add a crop to your farm so the siren can analyse crop stage and weather.
         </p>
       </section>
@@ -146,19 +142,20 @@ export function PestSirenCard({
 
   if (loading && !assessment) {
     return (
-      <section className="card space-y-3 p-4 sm:p-5">
-        <div className="h-5 w-32 animate-pulse-soft rounded bg-black/10 dark:bg-white/10" />
-        <div className="h-24 animate-pulse-soft rounded-xl bg-black/5 dark:bg-white/5" />
-        <div className="h-16 animate-pulse-soft rounded-xl bg-black/5 dark:bg-white/5" />
+      <section role="status" className="card space-y-4 p-5 sm:p-6">
+        <span className="sr-only">Loading pest analysis…</span>
+        <div aria-hidden className="h-5 w-32 animate-pulse-soft rounded bg-paper-deep" />
+        <div aria-hidden className="h-24 animate-pulse-soft rounded-xl bg-paper-deep" />
+        <div aria-hidden className="h-16 animate-pulse-soft rounded-xl bg-paper-deep" />
       </section>
     );
   }
 
   if (!assessment) {
     return (
-      <section className="card space-y-3 p-4 sm:p-5">
-        <h2 className="flex items-center gap-2 text-base font-semibold">
-          <Siren className="h-4 w-4" />
+      <section className="card space-y-4 p-5 sm:p-6">
+        <h2 className="flex items-center gap-2 text-lg font-semibold leading-snug">
+          <Siren aria-hidden className="h-5 w-5" />
           Pest siren
         </h2>
         <Callout tone="warn">{error ?? "No pest analysis available yet."}</Callout>
@@ -173,6 +170,7 @@ export function PestSirenCard({
   const meta = PEST_LEVEL_META[assessment.level];
   const styles = LEVEL_STYLES[assessment.level];
   const alerting = assessment.level === "high" || assessment.level === "critical";
+  const score = Math.min(100, Math.max(0, assessment.score));
   const analysedAt = new Date(assessment.analysedAt).toLocaleTimeString(undefined, {
     hour: "2-digit",
     minute: "2-digit",
@@ -180,23 +178,22 @@ export function PestSirenCard({
 
   return (
     <section
-      className={cn("card overflow-hidden border-2", styles.card)}
+      className="card overflow-hidden"
       aria-live="polite"
     >
-      <header className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border)] px-4 py-3.5 sm:px-5">
-        <div className="flex items-start gap-3">
+      <header className="flex flex-wrap items-start justify-between gap-4 border-b border-[var(--border)] p-5 sm:px-6">
+        <div className="flex min-w-0 items-start gap-3">
           <span
             className={cn(
               "flex h-10 w-10 shrink-0 items-center justify-center rounded-xl",
               styles.icon,
-              alerting ? "animate-siren-ring" : "",
             )}
           >
-            <Siren className="h-5 w-5" />
+            <Siren aria-hidden className="h-5 w-5" />
           </span>
-          <div>
-            <h2 className="text-base font-semibold leading-tight">Pest siren</h2>
-            <p className="muted mt-0.5 text-xs">
+          <div className="min-w-0">
+            <h2 className="text-lg font-semibold leading-snug">Pest siren</h2>
+            <p className="muted mt-1 text-xs leading-relaxed">
               Crop stage + live weather
               {farmName ? ` · ${farmName}` : ""} · checked {analysedAt}
             </p>
@@ -208,14 +205,14 @@ export function PestSirenCard({
             <ShieldAlert className="h-3.5 w-3.5" />
             {meta.label} · {assessment.score}/100
           </span>
-          <Button variant="ghost" onClick={() => void load()} loading={loading} className="min-h-8! px-2.5!">
+          <Button variant="ghost" onClick={() => void load()} loading={loading} className="px-3">
             <RefreshCw className="h-4 w-4" />
             <span className="sr-only">Refresh pest analysis</span>
           </Button>
         </div>
       </header>
 
-      <div className="space-y-3 p-4 sm:p-5">
+      <div className="space-y-5 p-5 sm:p-6">
         <div>
           <div className="flex items-center justify-between gap-2 text-xs">
             <span className="font-semibold">
@@ -223,19 +220,28 @@ export function PestSirenCard({
             </span>
             <span className="muted tabular-nums">{assessment.score}/100</span>
           </div>
-          <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+          <div
+            role="meter"
+            aria-label="Pest risk score"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={score}
+            aria-valuetext={`${meta.label}, ${score} out of 100`}
+            className="mt-2 h-2 overflow-hidden rounded-full bg-paper-deep"
+          >
             <div
-              className={cn("h-full rounded-full transition-all", styles.bar)}
-              style={{ width: `${Math.max(3, assessment.score)}%` }}
+              className={cn("h-full w-full origin-left rounded-full", styles.bar)}
+              style={{ transform: `scaleX(${score / 100})` }}
             />
           </div>
-          <p className="muted mt-2 text-xs leading-relaxed">{assessment.summary}</p>
+          <p className="muted mt-3 text-sm leading-relaxed">{assessment.summary}</p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant={alerting && !soundArmed ? "danger" : "secondary"}
             onClick={() => void toggleSound()}
+            aria-pressed={soundArmed}
           >
             {soundArmed ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
             {soundArmed
@@ -251,53 +257,50 @@ export function PestSirenCard({
           ) : null}
         </div>
 
-        <div className="grid gap-2 sm:grid-cols-2">
-          <div className="card-muted p-3">
-            <p className="muted text-[11px] font-semibold uppercase tracking-[0.08em]">
+        <div className="grid gap-5 border-t border-[var(--border)] pt-5 sm:grid-cols-2">
+          <div>
+            <h3 className="text-sm font-semibold">
               Threats to scout
-            </p>
-            <ul className="mt-2 space-y-2">
+            </h3>
+            <ul className="mt-3 space-y-3">
               {assessment.threats.map((threat) => (
                 <li key={threat.name} className="text-sm">
                   <p className="font-semibold">
-                    <span aria-hidden className="mr-1">
-                      {threat.emoji}
-                    </span>
                     {threat.name}
                   </p>
-                  <p className="muted mt-0.5 text-xs leading-snug">{threat.reason}</p>
+                  <p className="muted mt-1 text-xs leading-relaxed">{threat.reason}</p>
                 </li>
               ))}
             </ul>
           </div>
 
-          <div className="card-muted p-3">
-            <p className="muted text-[11px] font-semibold uppercase tracking-[0.08em]">
+          <div>
+            <h3 className="text-sm font-semibold">
               Why this score
-            </p>
+            </h3>
             {assessment.factors.length > 0 ? (
-              <ul className="mt-2 space-y-1.5">
+              <ul className="mt-3 space-y-2">
                 {assessment.factors.map((factor) => (
                   <li key={factor} className="flex items-start gap-1.5 text-xs">
-                    <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0 text-brand-600 dark:text-brand-400" />
+                    <Activity className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-600" />
                     <span>{factor}</span>
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="muted mt-2 text-xs">No strong weather drivers right now.</p>
+              <p className="muted mt-3 text-xs leading-relaxed">No strong weather drivers right now.</p>
             )}
           </div>
         </div>
 
         <div>
-          <p className="muted text-[11px] font-semibold uppercase tracking-[0.08em]">
+          <h3 className="text-sm font-semibold">
             Scout plan
-          </p>
-          <ul className="mt-1.5 space-y-1.5">
+          </h3>
+          <ul className="mt-3 space-y-2">
             {assessment.actions.map((action) => (
               <li key={action} className="flex items-start gap-2 text-sm">
-                <Bug className="mt-0.5 h-4 w-4 shrink-0 text-brand-600 dark:text-brand-400" />
+                <Bug className="mt-0.5 h-4 w-4 shrink-0 text-accent-600" />
                 <span>{action}</span>
               </li>
             ))}
@@ -327,7 +330,7 @@ export function PestSirenCard({
           />
         </div>
 
-        <p className="muted text-[11px] leading-relaxed">
+        <p className="muted text-xs leading-relaxed">
           Rule-based analysis from your crop day and Open-Meteo. It is a scouting prompt, not a
           chemical prescription — confirm locally before spraying.
         </p>
@@ -348,10 +351,10 @@ function Stat({
   value: string;
 }) {
   return (
-    <div className="card-muted flex items-center gap-2 px-2.5 py-2">
+    <div className="flex items-center gap-2 py-2">
       <span className="text-[var(--muted)]">{icon}</span>
       <span className="min-w-0">
-        <span className="muted block text-[10px] font-semibold uppercase tracking-[0.06em]">
+        <span className="muted block font-medium">
           {label}
         </span>
         <span className="block font-semibold tabular-nums">{value}</span>

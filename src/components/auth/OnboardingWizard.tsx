@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -33,7 +33,7 @@ const MapDrawer = dynamic(
   {
     ssr: false,
     loading: () => (
-      <div className="h-[52vh] min-h-[320px] animate-pulse-soft rounded-2xl bg-black/5 dark:bg-white/5" />
+      <div className="h-[52vh] min-h-[320px] animate-pulse-soft rounded-2xl bg-paper-deep" />
     ),
   },
 );
@@ -77,6 +77,11 @@ export function OnboardingWizard() {
 
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const stepHeadingRef = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    if (step > 0) stepHeadingRef.current?.focus({ preventScroll: true });
+  }, [step]);
 
   const loadFarms = useCallback(async () => {
     setFarmsLoading(true);
@@ -227,46 +232,44 @@ export function OnboardingWizard() {
   if (checking) {
     return (
       <div className="flex min-h-dvh items-center justify-center">
-        <div className="h-2 w-40 animate-pulse-soft rounded-full bg-black/10 dark:bg-white/10" />
+        <div className="h-2 w-40 animate-pulse-soft rounded-full bg-paper-deep" />
       </div>
     );
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 py-8 sm:px-6">
-      <header className="flex items-center justify-between gap-3">
-        <Link href="/login" className="flex items-center gap-2.5 font-semibold">
-          <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-700 text-white shadow-sm">
+    <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <Link href="/login" className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
+          <span className="brand-mark h-11 w-11">
             <Leaf className="h-5 w-5" strokeWidth={2.4} />
           </span>
-          <span className="text-xl tracking-tight">
-            Agro<span className="text-brand-700 dark:text-brand-400">AI</span>
-          </span>
+          AgroAI
         </Link>
-        <Link href="/login" className="muted text-sm font-semibold hover:text-[var(--foreground)]">
-          Already registered? Sign in
+        <Link href="/login" className="btn btn-ghost text-sm">
+          <span className="hidden sm:inline">Already registered?</span> Sign in
         </Link>
       </header>
 
-      <div className="mt-8">
-        <ol className="grid grid-cols-4 gap-1.5" aria-label="Onboarding progress">
+      <div className="mt-8 sm:mt-10">
+        <ol className="grid grid-cols-4 gap-3" aria-label="Onboarding progress">
           {STEPS.map((entry, index) => {
             const Icon = entry.icon;
             const done = index < step;
             const current = index === step;
             return (
-              <li key={entry.label} className="min-w-0">
+              <li key={entry.label} className="min-w-0" aria-current={current ? "step" : undefined}>
                 <div
                   className={cn(
-                    "mb-1.5 h-1.5 rounded-full transition-colors",
-                    done || current ? "bg-brand-600" : "bg-black/10 dark:bg-white/10",
+                    "mb-3 h-1.5 rounded-full transition-colors",
+                    done || current ? "bg-leaf-600" : "bg-paper-deep",
                   )}
                 />
                 <div
                   className={cn(
-                    "flex items-center gap-1.5 text-[11px] font-semibold sm:text-xs",
+                    "flex flex-col items-start gap-2 text-xs font-medium leading-relaxed sm:flex-row sm:items-center",
                     current
-                      ? "text-brand-700 dark:text-brand-400"
+                      ? "text-leaf-700"
                       : done
                         ? "text-[var(--foreground)]"
                         : "muted",
@@ -277,7 +280,7 @@ export function OnboardingWizard() {
                   ) : (
                     <Icon className="h-4 w-4 shrink-0" />
                   )}
-                  <span className="truncate">{entry.label}</span>
+                  <span>{entry.label}{done ? <span className="sr-only">, completed</span> : null}</span>
                 </div>
               </li>
             );
@@ -285,26 +288,35 @@ export function OnboardingWizard() {
         </ol>
       </div>
 
-      <section className="card mt-4 space-y-5 p-5 sm:p-7">
+      <form
+        className="card auth-form mt-6 space-y-6 p-6 sm:p-8"
+        aria-label="Create your farm account"
+        aria-busy={submitting}
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (step < STEPS.length - 1) next();
+          else void finish();
+        }}
+      >
         {error ? <Callout tone="danger">{error}</Callout> : null}
 
-        <div key={step} className="animate-rise">
+        <div key={step}>
         {step === 0 ? (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">What is your name?</h1>
-              <p className="muted mt-1 text-sm">
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">What is your name?</h1>
+              <p className="muted mt-3 text-sm leading-relaxed">
                 We use it to greet you and as your login name. Your PIN is created in the last step.
               </p>
             </div>
             <label className="block">
-              <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+              <span className="mb-2 block text-sm font-medium text-ink">
                 Farmer name
               </span>
               <div className="relative mt-1.5">
-                <UserRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
+                <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-accent-500" />
                 <input
-                  className="input pl-10"
+                  className="input pl-11"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
                   placeholder="e.g. Ramesh Patel"
@@ -320,11 +332,11 @@ export function OnboardingWizard() {
         ) : null}
 
         {step === 1 ? (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-semibold tracking-tight">Select your farm</h1>
-                <p className="muted mt-1 text-sm">
+                <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Select your farm</h1>
+                <p className="muted mt-3 text-sm leading-relaxed">
                   Pick a farm that is waiting to be claimed, or draw your own boundary on the map.
                 </p>
               </div>
@@ -335,7 +347,7 @@ export function OnboardingWizard() {
             </div>
 
             {farmsLoading ? (
-              <div className="h-20 animate-pulse-soft rounded-xl bg-black/5 dark:bg-white/5" />
+              <div className="h-20 animate-pulse-soft rounded-2xl bg-paper-deep" />
             ) : farms.length === 0 ? (
               <Callout tone="info" title="No farm available to select">
                 <p>
@@ -344,7 +356,7 @@ export function OnboardingWizard() {
                 </p>
               </Callout>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-3 sm:grid-cols-2">
                 {farms.map((farm) => {
                   const selected = farmId === farm.id;
                   return (
@@ -352,16 +364,12 @@ export function OnboardingWizard() {
                       key={farm.id}
                       type="button"
                       onClick={() => setFarmId(farm.id)}
-                      className={cn(
-                        "flex items-start justify-between gap-3 rounded-xl border p-3.5 text-left transition-colors",
-                        selected
-                          ? "border-brand-500 bg-brand-50/70 dark:bg-brand-900/30"
-                          : "border-[var(--border)] bg-[var(--card)] hover:border-brand-400",
-                      )}
+                      aria-pressed={selected}
+                      className="selection-card flex items-start justify-between gap-3 p-4 text-left"
                     >
                       <div className="min-w-0">
-                        <p className="truncate font-semibold">{farm.name}</p>
-                        <p className="muted mt-0.5 text-xs tabular-nums">
+                        <p className="break-words text-sm font-semibold">{farm.name}</p>
+                        <p className="muted mt-2 text-xs tabular-nums">
                           {farm.centroidLat.toFixed(4)}, {farm.centroidLng.toFixed(4)}
                         </p>
                         <p className="muted text-xs">
@@ -374,8 +382,8 @@ export function OnboardingWizard() {
                         className={cn(
                           "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors",
                           selected
-                            ? "border-brand-600 bg-brand-600 text-white"
-                            : "border-black/20 dark:border-white/30",
+                            ? "border-leaf-700 bg-leaf-700 text-white"
+                            : "border-line-strong",
                         )}
                       >
                         {selected ? <Check className="h-3 w-3" strokeWidth={3} /> : null}
@@ -403,10 +411,10 @@ export function OnboardingWizard() {
         ) : null}
 
         {step === 2 ? (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Select your crop</h1>
-              <p className="muted mt-1 text-sm">
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Select your crop</h1>
+              <p className="muted mt-3 text-sm leading-relaxed">
                 Tell us what is growing and which day it is on. The guide uses this plus your
                 farm&apos;s live forecast.
               </p>
@@ -414,7 +422,7 @@ export function OnboardingWizard() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
-                <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+                <span className="text-sm font-medium text-ink">
                   Crop
                 </span>
                 <select
@@ -431,7 +439,7 @@ export function OnboardingWizard() {
               </label>
 
               <label className="block">
-                <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+                <span className="text-sm font-medium text-ink">
                   Crop day (days since sowing)
                 </span>
                 <div className="relative mt-1.5">
@@ -451,7 +459,7 @@ export function OnboardingWizard() {
             </div>
 
             <label className="block sm:max-w-xs">
-              <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+              <span className="text-sm font-medium text-ink">
                 Expected crop duration (days)
               </span>
               <input
@@ -473,20 +481,21 @@ export function OnboardingWizard() {
             </label>
 
             {preview ? (
-              <div className="rounded-xl border border-brand-500/30 bg-brand-50/60 p-4 dark:bg-brand-900/20">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="font-semibold">
+              <div className="rounded-xl bg-leaf-100 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold">
                     {preview.emoji} Day {preview.ageDays} · {preview.stage.name}
                   </p>
-                  <span className="chip chip-brand">{preview.progress}%</span>
+                  <span className="chip chip-lime">{preview.progress}%</span>
                 </div>
-                <div className="mt-2.5 h-2 overflow-hidden rounded-full bg-black/10 dark:bg-white/10">
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-card" role="progressbar" aria-label="Crop season progress" aria-valuenow={preview.progress} aria-valuemin={0} aria-valuemax={100}>
                   <div
-                    className="h-full rounded-full bg-brand-600"
-                    style={{ width: `${Math.max(2, preview.progress)}%` }}
+                    className="progress-fill h-full rounded-full bg-leaf-600"
+                    style={{ transform: `scaleX(${preview.progress / 100})` }}
+                    aria-hidden
                   />
                 </div>
-                <p className="muted mt-2.5 text-xs">
+                <p className="muted mt-3 text-xs leading-relaxed">
                   {preview.stage.focus} Harvest window in about {preview.daysToHarvest} days.
                 </p>
               </div>
@@ -495,17 +504,17 @@ export function OnboardingWizard() {
         ) : null}
 
         {step === 3 ? (
-          <div className="space-y-4">
+          <div className="space-y-5">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Create your PIN</h1>
-              <p className="muted mt-1 text-sm">
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Create your PIN</h1>
+              <p className="muted mt-3 text-sm leading-relaxed">
                 You will sign in with <strong>{name.trim() || "your name"}</strong> and this PIN.
                 Suggested format: name + 1234.
               </p>
             </div>
 
             <label className="block">
-              <span className="muted text-xs font-semibold uppercase tracking-[0.08em]">
+              <span className="text-sm font-medium text-ink">
                 Login PIN
               </span>
               <div className="relative mt-1.5">
@@ -528,9 +537,9 @@ export function OnboardingWizard() {
               </span>
             </label>
 
-            <div className="rounded-xl border border-[var(--border)] bg-[var(--card-muted)] p-4 text-sm">
+            <div className="rounded-xl bg-[var(--card-muted)] p-4 text-sm">
               <p className="font-semibold">Ready to create your account</p>
-              <dl className="mt-2 grid gap-1.5 text-xs sm:grid-cols-2">
+              <dl className="mt-4 grid gap-4 text-xs sm:grid-cols-2">
                 <div>
                   <dt className="muted">Name</dt>
                   <dd className="font-semibold">{name.trim() || "—"}</dd>
@@ -559,7 +568,7 @@ export function OnboardingWizard() {
 
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-[var(--border)] pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-[var(--border)] pt-5">
           {step > 0 ? (
             <Button variant="ghost" onClick={back} disabled={submitting}>
               <ArrowLeft className="h-4 w-4" />
@@ -570,18 +579,18 @@ export function OnboardingWizard() {
           )}
 
           {step < STEPS.length - 1 ? (
-            <Button onClick={next}>
+            <Button type="submit">
               Continue
               <ArrowRight className="h-4 w-4" />
             </Button>
           ) : (
-            <Button onClick={finish} loading={submitting}>
+            <Button type="submit" loading={submitting}>
               <Check className="h-4 w-4" />
-              Create account &amp; open dashboard
+              Create account
             </Button>
           )}
         </div>
-      </section>
+      </form>
     </div>
   );
 }

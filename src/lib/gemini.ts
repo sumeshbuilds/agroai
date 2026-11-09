@@ -1,5 +1,6 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+import { getCropDayGuide } from "./crop-guide";
 import type { DailyForecast, WeatherSnapshot } from "./weather";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
@@ -9,6 +10,8 @@ export interface WeeklyReportInput {
   growthStage: string;
   ageDays: number;
   sowingDate: string;
+  /** Expected sowing-to-harvest duration, used to place the crop in its stage. */
+  durationDays?: number | null;
   weather: WeatherSnapshot;
 }
 
@@ -78,7 +81,8 @@ export async function generateWeeklyReport(
 }
 
 export function buildPrompt(input: WeeklyReportInput): string {
-  const { cropName, growthStage, ageDays, sowingDate, weather } = input;
+  const { cropName, ageDays, sowingDate, weather } = input;
+  const guide = getCropDayGuide(cropName, ageDays, input.durationDays);
 
   const forecast = weather.daily
     .map(
@@ -96,11 +100,16 @@ export function buildPrompt(input: WeeklyReportInput): string {
 
   return [
     `Crop: ${cropName}`,
-    `Growth stage: ${growthStage}`,
+    `Growth stage: ${guide.stage.name} (day ${guide.ageDays} of about ${guide.durationDays})`,
     `Sown on: ${sowingDate} (${ageDays} days old)`,
     `Farm location: ${weather.latitude.toFixed(3)}, ${weather.longitude.toFixed(3)} (${weather.timezone})`,
     `Current temperature: ${weather.current.temperature ?? "n/a"}°C`,
     `Surface soil moisture (0-1 cm): ${soil}`,
+    "",
+    "Stage focus for this crop:",
+    guide.stage.focus,
+    `Typical tasks now: ${guide.stage.tasks.join("; ")}`,
+    `Watch for now: ${guide.stage.watchFor.join(", ")}`,
     "",
     "Next 7 days forecast:",
     forecast,
@@ -110,13 +119,14 @@ export function buildPrompt(input: WeeklyReportInput): string {
     "## Fertilizer & Spraying",
     "## Pest & Disease Watch",
     "## Next Step",
-    "Each section must be 1-2 sentences. Reference specific days from the forecast (e.g. 'Do not spray on Wednesday because of high rain probability'). Do not add any other sections.",
+    `Each section must be 1-2 sentences and specific to ${cropName} at the ${guide.stage.name} stage. Reference specific days from the forecast (e.g. 'Do not spray on Wednesday because of high rain probability'). In Pest & Disease Watch, name the crop-specific threats listed above. Do not add any other sections.`,
   ].join("\n");
 }
 
-/** Deterministic, weather-driven advisory used when Gemini is unavailable. */
+/** Deterministic, weather- and crop-stage-driven advisory used when Gemini is unavailable. */
 export function buildFallbackPlan(input: WeeklyReportInput): string {
   const { cropName, ageDays, weather } = input;
+  const guide = getCropDayGuide(cropName, ageDays, input.durationDays);
   const days = weather.daily.slice(0, 7);
 
   const wettest = pickDay(days, (day) => day.precipitationProbability);
@@ -127,11 +137,19 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
   const wetSoon = days.slice(0, 3).some((day) => day.precipitationSum >= 10);
   const soilDry = soil !== null && soil < 0.12;
 
-  const irrigation = wetSoon
+  const waterTask = guide.stage.tasks.find((task) =>
+    /water|irrigat|flood|moist/i.test(task),
+  );
+
+  const irrigationBase = wetSoon
     ? `Rain is forecast around ${dayName(wettest)} — pause irrigation and let the rainfall soak in.`
     : soilDry
       ? `Surface soil moisture is low (${soil === null ? "n/a" : `${(soil * 100).toFixed(0)}%`}). Irrigate lightly early morning on ${dayName(dry)}, the driest day ahead.`
       : `Soil moisture is adequate. Keep a light irrigation schedule and skip any watering on ${dayName(wettest)} if rain arrives.`;
+
+  const irrigation = `${irrigationBase}${
+    waterTask ? ` At this stage: ${lowerFirst(waterTask)}` : ""
+  }`;
 
   const sprayDay = days
     .slice(0, 4)
@@ -142,21 +160,29 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
       return score(day) < score(best) ? day : best;
     }, null);
 
-  const spray = sprayDay
+  const feedTask = guide.stage.tasks.find((task) =>
+    /fertil|nitrogen|top.?dress|nutrient|manure|compost|feed/i.test(task),
+  );
+
+  const sprayBase = sprayDay
     ? `Spray or apply fertilizer on ${dayName(sprayDay)} when winds are lowest (~${sprayDay.windSpeedMax.toFixed(0)} km/h). Avoid spraying on ${dayName(windiest)} — winds up to ${windiest.windSpeedMax.toFixed(0)} km/h.`
     : `Spray in the calm early-morning window and avoid windy days.`;
 
-  const humid = days.slice(0, 3).some((day) => day.precipitationProbability >= 60);
-  const pest = humid
-    ? `With rain and high humidity expected, watch ${cropName.toLowerCase()} for fungal leaf spots and blight. Inspect the underside of leaves and remove any infected parts.`
-    : `Dry, warm conditions favour sucking pests (aphids, thrips, mites). Scout the crop every 2-3 days and act early.`;
+  const spray = `${sprayBase}${
+    feedTask ? ` For this crop: ${lowerFirst(feedTask)}` : ""
+  }`;
 
-  const nextStep =
-    ageDays < 30
-      ? `The crop is ${ageDays} days old (young stage). Finish gap-filling, do a light weeding and a first top-dressing of nitrogen if not already done.`
-      : ageDays < 60
-        ? `At ${ageDays} days the crop is actively growing. Do a weeding pass and apply the next dose of fertilizer, then re-check soil moisture weekly.`
-        : `At ${ageDays} days the crop is maturing. Watch for pest pressure, keep the field clean, and plan harvest logistics well in advance.`;
+  const humid = days.slice(0, 3).some((day) => day.precipitationProbability >= 60);
+  const watchFor = guide.stage.watchFor.slice(0, 2).join(" and ");
+  const pest = humid
+    ? `With rain and high humidity expected, watch ${cropName.toLowerCase()} for ${watchFor}. Inspect the underside of leaves and remove any infected parts.`
+    : `Dry, warm conditions favour ${watchFor} at this stage. Scout ${cropName.toLowerCase()} every 2-3 days and act on the first sign of damage.`;
+
+  const stageTask = guide.stage.tasks[0];
+  const followUpTask = guide.stage.tasks[1];
+  const nextStep = `Day ${guide.ageDays} · ${guide.stage.name}. ${stageTask}${
+    followUpTask ? ` ${followUpTask}` : ""
+  }`;
 
   return [
     "## Irrigation",
@@ -171,6 +197,10 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
     "## Next Step",
     nextStep,
   ].join("\n");
+}
+
+function lowerFirst(value: string): string {
+  return value.charAt(0).toLowerCase() + value.slice(1);
 }
 
 function pickDay(
