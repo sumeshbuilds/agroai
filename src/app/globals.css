@@ -832,6 +832,37 @@
   animation: pulse-soft 2s var(--ease-in-out) infinite;
 }
 
+/* Plant doctor: a thin light line sweeps over the photo while the AI reads it. */
+.scan-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8%;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--color-leaf-300),
+    #ffffff,
+    var(--color-leaf-300),
+    transparent
+  );
+  box-shadow: 0 0 18px 2px color-mix(in srgb, var(--color-leaf-300) 60%, transparent);
+  animation: scan-sweep 2s var(--ease-in-out) infinite alternate;
+  pointer-events: none;
+}
+
+@keyframes scan-sweep {
+  from {
+    top: 8%;
+    opacity: 0.55;
+  }
+  to {
+    top: 92%;
+    opacity: 1;
+  }
+}
+
 .skip-link {
   position: fixed;
   top: 1rem;
@@ -972,8 +1003,13 @@ body .leaflet-container {
   .animate-spin,
   .animate-pulse-soft,
   .alarm-toast,
-  .alarm-toast-ring {
+  .alarm-toast-ring,
+  .scan-line {
     animation: none;
+  }
+
+  .scan-line {
+    top: 50%;
   }
 
   .animate-rise,

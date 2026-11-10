@@ -11,6 +11,7 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type { DetectionBox, FrameDetection } from "@/lib/camera";
+import type { DiseaseSeverity, DiseaseHealthStatus, PathogenType } from "@/lib/disease";
 import type { GeoPoint } from "@/lib/types";
 
 // 1. Farmers / Users Table
@@ -167,6 +168,49 @@ export const weeklyReports = pgTable("weekly_reports", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+// 8. Plant-health scans
+// One row per photo. The compressed JPEG is stored as base64 text so the
+// history survives without an object-storage account; the AI verdict is
+// stored both as key columns (for filtering) and JSON arrays (for the UI).
+export const diseaseScans = pgTable(
+  "disease_scans",
+  {
+    id: serial("id").primaryKey(),
+    farmerId: integer("farmer_id")
+      .notNull()
+      .references(() => farmers.id, { onDelete: "cascade" }),
+    cropId: integer("crop_id").references(() => crops.id, {
+      onDelete: "set null",
+    }),
+    cropName: text("crop_name"),
+    plantPart: text("plant_part").notNull().default("leaf"),
+    note: text("note"),
+    imageMime: text("image_mime").notNull().default("image/jpeg"),
+    /** Base64 JPEG/PNG bytes without the `data:` prefix. */
+    imageData: text("image_data").notNull(),
+    healthStatus: text("health_status").$type<DiseaseHealthStatus>().notNull(),
+    diseaseName: text("disease_name"),
+    pathogenType: text("pathogen_type").$type<PathogenType>().notNull().default("unknown"),
+    severity: text("severity").$type<DiseaseSeverity>().notNull().default("unknown"),
+    confidence: doublePrecision("confidence").notNull().default(0),
+    summary: text("summary").notNull().default(""),
+    symptoms: jsonb("symptoms").$type<string[]>().notNull(),
+    causes: jsonb("causes").$type<string[]>().notNull(),
+    immediateActions: jsonb("immediate_actions").$type<string[]>().notNull(),
+    organicTreatment: jsonb("organic_treatment").$type<string[]>().notNull(),
+    chemicalTreatment: jsonb("chemical_treatment").$type<string[]>().notNull(),
+    prevention: jsonb("prevention").$type<string[]>().notNull(),
+    lookAlikes: jsonb("look_alikes").$type<string[]>().notNull(),
+    source: text("source").notNull().default("gemini"),
+    model: text("model"),
+    createdAt: timestamp("created_at").defaultNow(),
+  },
+  (table) => [
+    index("disease_scans_farmer_idx").on(table.farmerId, table.createdAt),
+    index("disease_scans_crop_idx").on(table.cropId),
+  ],
+);
+
 export type Farmer = typeof farmers.$inferSelect;
 export type Farmland = typeof farmlands.$inferSelect;
 export type Crop = typeof crops.$inferSelect;
@@ -174,3 +218,4 @@ export type CameraSession = typeof cameraSessions.$inferSelect;
 export type CameraDetection = typeof cameraDetections.$inferSelect;
 export type CameraAlert = typeof cameraAlerts.$inferSelect;
 export type WeeklyReport = typeof weeklyReports.$inferSelect;
+export type DiseaseScan = typeof diseaseScans.$inferSelect;

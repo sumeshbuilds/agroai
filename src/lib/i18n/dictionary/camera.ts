@@ -20,7 +20,7 @@ export const CAMERA: Record<string, string> = {
     "Android Chrome ଡେମୋ ଉପାୟ: {flag} ଖୋଲନ୍ତୁ, {origin} ଯୋଡ଼ନ୍ତୁ, ସକ୍ରିୟ କରି Chrome ପୁନଃ ଚାଲୁ କରନ୍ତୁ।",
   "Or run {command} and accept the certificate on the phone.":
     "କିମ୍ବା {command} ଚଲାନ୍ତୁ ଓ ଫୋନ୍ରେ ସାର୍ଟିଫିକେଟ୍ ଗ୍ରହଣ କରନ୍ତୁ।",
-  "Alarm sent to dashboard": "ଡ୍ୟାସବୋର୍ଡକୁ ସତର୍କତା ପଠାଗଲା",
+  "Alarm saved on dashboard": "ଡ୍ୟାସବୋର୍ଡରେ ସତର୍କତା ସଂରକ୍ଷିତ",
   "{message} · {confidence}% confidence": "{message} · {confidence}% ବିଶ୍ୱାସ",
   "Live preview from this phone camera": "ଏହି ଫୋନ୍ କ୍ୟାମେରାର ଲାଇଭ୍ ପୂର୍ବାବଲୋକନ",
   "Live": "ଲାଇଭ୍",
@@ -54,8 +54,8 @@ export const CAMERA: Record<string, string> = {
   "Checking": "ଯାଞ୍ଚ ହେଉଛି",
   "moving": "ଗତିଶୀଳ",
   "still": "ସ୍ଥିର",
-  "Detection runs on this phone. Only humans and animals are tracked; frames shrink to 320–560 px and slow automatically on 2G/data saver. No video is stored.":
-    "ଚିହ୍ନଟ ଏହି ଫୋନ୍ରେ ହିଁ ଚାଲେ। କେବଳ ମାନବ ଓ ପଶୁ ଟ୍ରାକ୍ ହୁଅନ୍ତି; 2G/ଡାଟା ସେଭରରେ ଫ୍ରେମ୍ ୩୨୦–୫୬୦ ପିକ୍ସେଲକୁ ଛୋଟ ହୋଇ ସ୍ୱତଃ ମନ୍ଥର ହୁଏ। କୌଣସି ଭିଡିଓ ସଂରକ୍ଷିତ ହୁଏ ନାହିଁ।",
+  "Detection runs on this phone. Only people and animals are tracked. Small JPEG snapshots and event records are sent to the dashboard; this is not continuous video recording.":
+    "ଚିହ୍ନଟ ଏହି ଫୋନ୍ରେ ହିଁ ଚାଲେ। କେବଳ ମାନବ ଓ ପଶୁ ଟ୍ରାକ୍ ହୁଅନ୍ତି। ଛୋଟ JPEG ସ୍ନାପସଟ୍ ଓ ଘଟଣା ରେକର୍ଡ ଡ୍ୟାସବୋର୍ଡକୁ ପଠାଯାଏ; ଏହା ଅବିରତ ଭିଡିଓ ରେକର୍ଡିଂ ନୁହେଁ।",
   "Keep this page open and point the rear camera at the field.":
     "ଏହି ପୃଷ୍ଠା ଖୋଲା ରଖନ୍ତୁ ଓ ପଛ କ୍ୟାମେରା ଜମି ଆଡ଼କୁ ରଖନ୍ତୁ।",
   "Data saver": "ଡାଟା ସେଭର",
@@ -96,4 +96,30 @@ export const CAMERA: Record<string, string> = {
     "AI ଚିହ୍ନଟକାରୀ ଉପଲବ୍ଧ ନାହିଁ — କେବଳ ଗତି ସହାୟକ।",
   "Could not load this camera session.":
     "ଏହି କ୍ୟାମେରା ସେସନ୍ ଲୋଡ୍ ହୋଇପାରିଲା ନାହିଁ।",
+  "Detection unavailable": "ଚିହ୍ନଟ ଉପଲବ୍ଧ ନାହିଁ",
+  "Video only": "କେବଳ ଭିଡିଓ",
+  "Video only — detection unavailable": "କେବଳ ଭିଡିଓ — ଚିହ୍ନଟ ଉପଲବ୍ଧ ନାହିଁ",
+  "Predicted": "ଅନୁମାନିତ",
+  "Camera controls": "କ୍ୟାମେରା ନିୟନ୍ତ୍ରଣ",
+  "Camera movement compensated": "କ୍ୟାମେରା ଗତି ସମାୟୋଜିତ",
+  "Camera zoom": "କ୍ୟାମେରା ଜୁମ୍",
+  "Refocus camera": "କ୍ୟାମେରା ପୁନଃ ଫୋକସ୍",
+  "Cancel camera start": "କ୍ୟାମେରା ଆରମ୍ଭ ବାତିଲ୍ କରନ୍ତୁ",
+  "Distant scan on": "ଦୂର ସ୍କାନ୍ ଚାଲୁ",
+  "Enable distant scan": "ଦୂର ସ୍କାନ୍ ସକ୍ରିୟ କରନ୍ତୁ",
+  "Retry detector": "ଚିହ୍ନଟକାରୀ ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ",
+  "Camera alarm receipts": "କ୍ୟାମେରା ସତର୍କତା ରସିଦ",
+  "Dismiss receipt: {message}": "ରସିଦ ବନ୍ଦ କରନ୍ତୁ: {message}",
+  "Dismiss receipts — dashboard siren stays on": "ରସିଦ ବନ୍ଦ କରନ୍ତୁ — ଡ୍ୟାସବୋର୍ଡ ସାଇରନ୍ ଚାଲୁ ରହେ",
+  "{count} confirmed event frames waiting to upload": "ଅପଲୋଡ୍ ଅପେକ୍ଷାରେ {count} ନିଶ୍ଚିତ ଘଟଣା ଫ୍ରେମ୍",
+  "Events are kept in memory until sent. Keep this page open and connected.":
+    "ପଠାଯିବା ପର୍ଯ୍ୟନ୍ତ ଘଟଣା ମେମୋରୀରେ ରହେ। ଏହି ପୃଷ୍ଠା ଖୋଲା ଓ ସଂଯୁକ୍ତ ରଖନ୍ତୁ।",
+  "Event buffer full. Detection is paused until uploads catch up; keep this page open.":
+    "ଘଟଣା ବଫର୍ ପୂର୍ଣ୍ଣ। ଅପଲୋଡ୍ ସରିବା ପର୍ଯ୍ୟନ୍ତ ଚିହ୍ନଟ ବିରତ; ଏହି ପୃଷ୍ଠା ଖୋଲା ରଖନ୍ତୁ।",
+  "Restart the camera to send queued events. Closing this page loses unsent frames.":
+    "ଧାଡ଼ିରେ ଥିବା ଘଟଣା ପଠାଇବାକୁ କ୍ୟାମେରା ପୁନଃ ଆରମ୍ଭ କରନ୍ତୁ। ଏହି ପୃଷ୍ଠା ବନ୍ଦ କଲେ ନ ପଠାଯାଇଥିବା ଫ୍ରେମ୍ ହଜିଯିବ।",
+  "People and animals are tracked on this phone. Alarm timing depends on the phone, connection and dashboard polling.":
+    "ମାନବ ଓ ପଶୁ ଏହି ଫୋନ୍ରେ ଟ୍ରାକ୍ ହୁଅନ୍ତି। ସତର୍କତା ସମୟ ଫୋନ୍, ସଂଯୋଗ ଓ ଡ୍ୟାସବୋର୍ଡ ପୋଲିଂ ଉପରେ ନିର୍ଭର କରେ।",
+  "Distant scan checks overlapping crops for small subjects. It uses more battery and may slow detection. Zoom and focus appear only on supported cameras.":
+    "ଦୂର ସ୍କାନ୍ ଛୋଟ ବସ୍ତୁ ପାଇଁ ଅତିକ୍ରମ କରୁଥିବା କ୍ରପ୍ ଯାଞ୍ଚ କରେ। ଏହା ଅଧିକ ବ୍ୟାଟେରୀ ଖର୍ଚ୍ଚ କରେ ଓ ଚିହ୍ନଟ ମନ୍ଥର କରିପାରେ। ଜୁମ୍ ଓ ଫୋକସ୍ କେବଳ ସମର୍ଥିତ କ୍ୟାମେରାରେ ଦେଖାଯାଏ।",
 };

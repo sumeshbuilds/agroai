@@ -60,6 +60,8 @@ export interface FrameDetection {
   hits?: number;
   /** Which model produced the final label. */
   source?: DetectionSource;
+  /** Predicted during a brief missed detection, not a new observation. */
+  coasting?: boolean;
 }
 
 /** Raw detection posted by the phone. The server enriches it. */
@@ -77,6 +79,7 @@ export interface IngestDetection {
   confirmed?: boolean;
   /** Frames seen so far (server uses it as a confidence signal). */
   hits?: number;
+  coasting?: boolean;
 }
 
 export interface CameraSessionDTO {
@@ -136,10 +139,24 @@ export interface CameraAlertDTO {
   message: string;
   source: DetectionSource;
   verified: boolean;
+  reviewStatus?: "pending" | "confirmed" | "unconfirmed";
   lat: number | null;
   lng: number | null;
   createdAt: string | null;
   acknowledgedAt: string | null;
+}
+
+export interface CameraAlertPage {
+  alerts: CameraAlertDTO[];
+  /** Total unread alarms in the dismissal-filtered scope, not just this page. */
+  unread: number;
+  /** Highest unread id at the time of this snapshot. */
+  latestId: number | null;
+  /** Pass as `beforeId` to load the next, older page. */
+  nextCursor: number | null;
+  /** Local stopped snapshot and pending individual dismissals excluded from this page and total. */
+  afterId?: number;
+  excludedIds?: number[];
 }
 
 export interface CameraIngestPayload {
@@ -162,6 +179,7 @@ export interface CameraIngestResponse {
   sessionId: number;
   frameUpdatedAt: string | null;
   newDetections: CameraDetectionDTO[];
+  /** New alarms plus matching unread receipts when a saved frame is retried. */
   newAlerts: CameraAlertDTO[];
   /** True when the frame was queued for Groq vision verification. */
   verificationQueued: boolean;
@@ -185,10 +203,7 @@ export const LIVE_WINDOW_MS = 15_000;
 export const TRACK_CONFIRM_HITS = 3;
 export const TRACK_CONFIRM_CONFIDENCE = 0.42;
 /** How long a lost track is kept alive (coasting) before it is dropped. */
-export const TRACK_MEMORY_MS = 1_600;
-
-/** Minimum gap between alarm rows for one camera (avoids alarm storms). */
-export const ALARM_COOLDOWN_MS = 8_000;
+export const TRACK_MEMORY_MS = 3_200;
 
 interface LabelMeta {
   label: string;
@@ -337,6 +352,7 @@ export function enrichDetection(input: IngestDetection): FrameDetection {
     confirmed: Boolean(input.confirmed),
     hits: input.hits,
     source: "on-device",
+    coasting: Boolean(input.coasting),
   };
 }
 
@@ -348,6 +364,7 @@ export function clamp01(value: number): number {
 export function cameraStats(detections: FrameDetection[]): CameraStats {
   return detections.reduce<CameraStats>(
     (stats, detection) => {
+      if (detection.coasting) return stats;
       if (detection.category === "person") stats.persons += 1;
       else if (detection.category === "animal") stats.animals += 1;
       else if (detection.category === "vehicle") stats.vehicles += 1;

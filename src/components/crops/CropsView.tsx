@@ -9,6 +9,7 @@ import {
   Map as MapIcon,
   Plus,
   RefreshCw,
+  ScanLine,
   Sparkles,
   SprayCan,
   Sprout,
@@ -666,14 +667,23 @@ export function CropsView() {
               </div>
             </div>
 
-            <Button
-              variant="secondary"
-              onClick={() => handleGenerate(selectedCrop.id)}
-              loading={generatingId === selectedCrop.id}
-            >
-              <Sparkles className="h-3.5 w-3.5" />
-              {t("Weekly advisory")}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Link
+                href={`/detect?cropId=${selectedCrop.id}`}
+                className="btn btn-secondary"
+              >
+                <ScanLine aria-hidden className="h-3.5 w-3.5" />
+                {t("Scan a leaf")}
+              </Link>
+              <Button
+                variant="secondary"
+                onClick={() => handleGenerate(selectedCrop.id)}
+                loading={generatingId === selectedCrop.id}
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                {t("Weekly advisory")}
+              </Button>
+            </div>
           </div>
 
           <div className="mt-6 grid gap-7 border-t border-[var(--color-line)] pt-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-center">

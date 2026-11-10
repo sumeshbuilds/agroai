@@ -88,6 +88,11 @@ export const WATCH: Record<string, string> = {
     "ବକ୍ସ, ଲେବଲ୍, ବିଶ୍ୱାସ ଓ ଗତି ପଥ ଏଠାରେ ଦେଖାଯିବ।",
   "Synthetic intrusion simulation was removed. Every alert on this page comes from a real camera track.":
     "କୃତ୍ରିମ ଅନୁପ୍ରବେଶ ସିମୁଲେସନ୍ ହଟାଯାଇଛି। ଏହି ପୃଷ୍ଠାର ପ୍ରତ୍ୟେକ ସତର୍କତା ପ୍ରକୃତ କ୍ୟାମେରା ଟ୍ରାକ୍ରୁ ଆସେ।",
+  "Detection unavailable": "ଚିହ୍ନଟ ଉପଲବ୍ଧ ନାହିଁ",
+  "No detections in this snapshot": "ଏହି ସ୍ନାପସଟ୍ରେ କୌଣସି ଚିହ୍ନଟ ନାହିଁ",
+  "On-device AI; optional verification": "ଫୋନ୍ରେ AI; ଇଚ୍ଛାଧୀନ ଯାଞ୍ଚ",
+  "Predicted": "ଅନୁମାନିତ",
+  "Video only": "କେବଳ ଭିଡିଓ",
   "Camera preview": "କ୍ୟାମେରା ପୂର୍ବାବଲୋକନ",
   "Live frame from {name}": "{name} ରୁ ଲାଇଭ୍ ଫ୍ରେମ୍",
   "Waiting for the phone camera": "ଫୋନ୍ କ୍ୟାମେରା ଅପେକ୍ଷାରେ",
@@ -116,17 +121,57 @@ export const WATCH: Record<string, string> = {
 
   /* Alarm banner */
   "Field alarms": "ଜମି ସତର୍କତା",
+  "Camera alarm popups": "କ୍ୟାମେରା ସତର୍କତା ପପଅପ୍",
   "Human on your field": "ଆପଣଙ୍କ ଜମିରେ ମାନବ",
   "Animal on your field": "ଆପଣଙ୍କ ଜମିରେ ପଶୁ",
   "{message} · {confidence}% confidence":
     "{message} · {confidence}% ବିଶ୍ୱାସ",
   "Dismiss alarm: {message}": "ସତର୍କତା ବନ୍ଦ କରନ୍ତୁ: {message}",
-  "Mute the alarm siren": "ସତର୍କ ସାଇରନ୍ ମ୍ୟୁଟ୍ କରନ୍ତୁ",
-  "Enable the alarm siren": "ସତର୍କ ସାଇରନ୍ ସକ୍ରିୟ କରନ୍ତୁ",
-  "Siren on": "ସାଇରନ୍ ଚାଲୁ",
-  "Siren off": "ସାଇରନ୍ ବନ୍ଦ",
+  "Needs human review": "ମାନବ ସମୀକ୍ଷା ଆବଶ୍ୟକ",
+  "Loading older alarms…": "ପୁରୁଣା ସତର୍କତା ଲୋଡ୍ ହେଉଛି…",
+  "Load older alarms": "ପୁରୁଣା ସତର୍କତା ଲୋଡ୍ କରନ୍ତୁ",
+  "Alarm settings": "ସତର୍କତା ସେଟିଂସ",
+  "Close alarm settings": "ସତର୍କତା ସେଟିଂସ ବନ୍ଦ କରନ୍ତୁ",
+  "Keep this app open and connected. Device volume, mute and browser restrictions still apply.":
+    "ଏହି ଆପ୍ ଖୋଲା ଓ ସଂଯୁକ୍ତ ରଖନ୍ତୁ। ଡିଭାଇସ୍ ଭଲ୍ୟୁମ୍, ମ୍ୟୁଟ୍ ଓ ବ୍ରାଉଜର ପ୍ରତିବନ୍ଧକ ତଥାପି ଲାଗୁ ହେବ।",
+  "Mute siren": "ସାଇରନ୍ ମ୍ୟୁଟ୍ କରନ୍ତୁ",
+  "Enable siren": "ସାଇରନ୍ ସକ୍ରିୟ କରନ୍ତୁ",
+  "Unlock sound": "ଧ୍ୱନି ଅନଲକ୍ କରନ୍ତୁ",
+  "Siren volume": "ସାଇରନ୍ ଭଲ୍ୟୁମ୍",
+  "Stop test": "ପରୀକ୍ଷା ବନ୍ଦ କରନ୍ତୁ",
+  "Test continuous siren": "ଅବିରତ ସାଇରନ୍ ପରୀକ୍ଷା କରନ୍ତୁ",
+  "Sound test only — no camera alert is created. It continues until you stop it.":
+    "କେବଳ ଧ୍ୱନି ପରୀକ୍ଷା — କୌଣସି କ୍ୟାମେରା ସତର୍କତା ତିଆରି ହୁଏ ନାହିଁ। ଆପଣ ବନ୍ଦ ନକରିବା ପର୍ଯ୍ୟନ୍ତ ଏହା ଚାଲୁ ରହେ।",
+  "Browser popups enabled": "ବ୍ରାଉଜର ପପଅପ୍ ସକ୍ରିୟ",
+  "Browser notifications blocked": "ବ୍ରାଉଜର ସୂଚନା ଅବରୋଧିତ",
+  "Browser notifications unavailable": "ବ୍ରାଉଜର ସୂଚନା ଉପଲବ୍ଧ ନାହିଁ",
+  "Enable browser popups": "ବ୍ରାଉଜର ପପଅପ୍ ସକ୍ରିୟ କରନ୍ତୁ",
+  "Allow notifications in your browser settings. In-app alarm popups still work.":
+    "ବ୍ରାଉଜର ସେଟିଂସରେ ସୂଚନା ଅନୁମତି ଦିଅନ୍ତୁ। ଆପ୍ ଭିତରର ସତର୍କତା ପପଅପ୍ ତଥାପି କାମ କରେ।",
+  "In-app popups always appear, even without notification permission.":
+    "ସୂଚନା ଅନୁମତି ନଥିଲେ ମଧ୍ୟ ଆପ୍ ଭିତରର ପପଅପ୍ ସର୍ବଦା ଦେଖାଯାଏ।",
+  "This browser could not save alarm settings. Keep the page open; check storage permissions before reloading.":
+    "ଏହି ବ୍ରାଉଜର ସତର୍କତା ସେଟିଂସ ସଂରକ୍ଷଣ କରିପାରିଲା ନାହିଁ। ପୃଷ୍ଠା ଖୋଲା ରଖନ୍ତୁ; ରିଲୋଡ୍ ପୂର୍ବରୁ ଷ୍ଟୋରେଜ୍ ଅନୁମତି ଯାଞ୍ଚ କରନ୍ତୁ।",
+  "Siren test running — not a detection": "ସାଇରନ୍ ପରୀକ୍ଷା ଚାଲୁଛି — ଏହା ଚିହ୍ନଟ ନୁହେଁ",
+  "Dismissal was not saved. Stopped alarms stay muted here; retry to save on other devices.":
+    "ବନ୍ଦ କରିବା ସଂରକ୍ଷିତ ହୋଇନାହିଁ। ବନ୍ଦ କରାଯାଇଥିବା ସତର୍କତା ଏଠାରେ ମ୍ୟୁଟ୍ ରହେ; ଅନ୍ୟ ଡିଭାଇସରେ ସଂରକ୍ଷଣ ପାଇଁ ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।",
+  "Saving…": "ସଂରକ୍ଷଣ ହେଉଛି…",
+  "Retry saving dismissal": "ବନ୍ଦ କରିବା ପୁଣି ସଂରକ୍ଷଣ କରନ୍ତୁ",
+  "Alarm connection lost. Existing alarms keep ringing; new alarms need a connection.":
+    "ସତର୍କତା ସଂଯୋଗ ହଜିଗଲା। ବିଦ୍ୟମାନ ସତର୍କତା ବାଜୁ ରହେ; ନୂଆ ସତର୍କତା ପାଇଁ ସଂଯୋଗ ଆବଶ୍ୟକ।",
+  "Sign in again to receive new alarms. Existing alarms stay active until you stop them.":
+    "ନୂଆ ସତର୍କତା ପାଇବାକୁ ପୁଣି ସାଇନ୍ ଇନ୍ କରନ୍ତୁ। ଆପଣ ବନ୍ଦ ନକରିବା ପର୍ଯ୍ୟନ୍ତ ବିଦ୍ୟମାନ ସତର୍କତା ସକ୍ରିୟ ରହେ।",
+  "Alarm sound muted": "ସତର୍କ ଧ୍ୱନି ମ୍ୟୁଟ୍",
+  "Alarm sound ready": "ସତର୍କ ଧ୍ୱନି ପ୍ରସ୍ତୁତ",
+  "Sound unavailable": "ଧ୍ୱନି ଉପଲବ୍ଧ ନାହିଁ",
+  "Tap to enable sound": "ଧ୍ୱନି ସକ୍ରିୟ କରିବାକୁ ଟ୍ୟାପ୍ କରନ୍ତୁ",
+  "Sound unavailable — use another browser": "ଧ୍ୱନି ଉପଲବ୍ଧ ନାହିଁ — ଅନ୍ୟ ବ୍ରାଉଜର ବ୍ୟବହାର କରନ୍ତୁ",
+  "Sound is blocked — tap to start the loud siren":
+    "ଧ୍ୱନି ଅବରୋଧିତ — ଜୋରରେ ସାଇରନ୍ ଆରମ୍ଭ କରିବାକୁ ଟ୍ୟାପ୍ କରନ୍ତୁ",
+  "Stop siren": "ସାଇରନ୍ ବନ୍ଦ କରନ୍ତୁ",
+  "Stop the siren and acknowledge this alarm snapshot":
+    "ସାଇରନ୍ ବନ୍ଦ କରି ଏହି ସତର୍କତା ସ୍ନାପସଟ୍ ସ୍ୱୀକାର କରନ୍ତୁ",
   "Open live watch": "ଲାଇଭ୍ ନଜର ଖୋଲନ୍ତୁ",
-  "Dismiss all alarms": "ସମସ୍ତ ସତର୍କତା ବନ୍ଦ କରନ୍ତୁ",
 
   /* Detection labels */
   "Person": "ମାନବ",

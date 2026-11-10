@@ -3,6 +3,7 @@ import { CAMERA } from "./camera";
 import { COMMON } from "./common";
 import { CROPS } from "./crops";
 import { DASHBOARD } from "./dashboard";
+import { DISEASE } from "./disease";
 import { GUIDE_A } from "./guide-a";
 import { GUIDE_B } from "./guide-b";
 import { MAP } from "./map";
@@ -15,6 +16,7 @@ export const ODIA: Record<string, string> = {
   ...COMMON,
   ...DASHBOARD,
   ...CROPS,
+  ...DISEASE,
   ...AUTH,
   ...MAP,
   ...WATCH,

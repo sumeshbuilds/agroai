@@ -14,7 +14,7 @@ interface RouteContext {
  * Serves the latest JPEG from a camera owned by the signed-in farmer.
  * The `v` cache-buster changes with every uploaded frame.
  */
-export async function GET(_request: Request, context: RouteContext) {
+export async function GET(request: Request, context: RouteContext) {
   await connection();
 
   try {
@@ -43,6 +43,16 @@ export async function GET(_request: Request, context: RouteContext) {
 
     const row = rows[0];
     if (!row?.frame) return fail("No frame received yet.", 404);
+    const version = row.frameUpdatedAt?.getTime().toString() ?? "";
+    const requestedVersion = new URL(request.url).searchParams.get("v");
+    // Only the latest image is stored. Never cache a newer JPEG under an old
+    // version and then draw that old version's boxes over the wrong image.
+    if (requestedVersion && requestedVersion !== version) {
+      return Response.json({ error: "A newer camera frame is available.", code: "FRAME_SUPERSEDED" }, {
+        status: 409,
+        headers: { "Cache-Control": "no-store", "X-Camera-Frame-Version": version },
+      });
+    }
 
     const base64 = row.frame.includes(",")
       ? row.frame.slice(row.frame.indexOf(",") + 1)
@@ -54,10 +64,9 @@ export async function GET(_request: Request, context: RouteContext) {
     return new Response(new Uint8Array(bytes), {
       status: 200,
       headers: {
-        "Content-Type": "image/jpeg",
-        // The URL includes ?v=<frame timestamp>, so immutable is safe and
-        // avoids re-downloading identical frames while the dashboard polls.
-        "Cache-Control": "private, max-age=60, immutable",
+        "Content-Type": row.frame.startsWith("data:image/webp") ? "image/webp" : "image/jpeg",
+        "X-Camera-Frame-Version": version,
+        "Cache-Control": requestedVersion ? "private, max-age=60, immutable" : "private, no-store",
         "Content-Length": String(bytes.length),
       },
     });

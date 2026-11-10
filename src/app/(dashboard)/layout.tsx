@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { AuthGate } from "@/components/auth/AuthGate";
 import { AppMobile, AppRail } from "@/components/layout/AppNav";
+import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 
 /**
  * App shell: a fixed-height workstation. The dark rail sits on the left on
@@ -15,6 +16,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
       <a href="#main-content" className="skip-link">
         Skip to content
       </a>
+      <CameraAlarmBanner />
       <div className="flex h-dvh overflow-hidden bg-[var(--background)]">
         <div className="sticky top-0 h-dvh shrink-0 p-4 pr-0 max-md:hidden">
           <AppRail />

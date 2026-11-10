@@ -17,7 +17,6 @@ import {
 
 import { AreaPanel } from "@/components/dashboard/AreaPanel";
 import { SetupNotice } from "@/components/setup/SetupNotice";
-import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 import { FarmSwitcher, WorkbenchBar } from "@/components/layout/PageBar";
 import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
@@ -255,7 +254,6 @@ export function DashboardView() {
   return (
     <div className="flex min-h-full flex-col px-4 py-5 sm:px-6 xl:h-full xl:min-h-0 xl:py-6">
       <h1 className="sr-only">{t("Field workstation")}</h1>
-      <CameraAlarmBanner intervalMs={6_000} />
 
       <WorkbenchBar
         left={

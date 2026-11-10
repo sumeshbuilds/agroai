@@ -656,3 +656,176 @@ left untouched.
 returns `null` on missing key, HTTP error or timeout, so ingest/alarms behave
 exactly as tested above either way.
 
+---
+
+## 12. Plant doctor — photo disease detection (10 Nov 2026)
+
+New `/detect` page for farmers: take a photo with the rear phone camera or
+upload one, choose the crop (optional) and plant part, add an optional note, and
+get an AI plant-health verdict with a practical action plan. The same scan can
+also be opened from a crop's day card (`Scan a leaf`).
+
+**Photo pipeline**
+
+- Browser-side `prepareScanImage()` loads the photo, applies EXIF orientation,
+  downscales the long edge to 1000 px, fills transparent PNGs on white and
+  re-encodes JPEG (quality 0.82 → 0.62 until ≤ 1.2 MB).
+- Upload is `multipart/form-data`; the server checks JPEG/PNG/WebP magic bytes,
+  not just the declared MIME type, and rejects anything over 2.5 MB.
+- The compressed JPEG is stored as base64 in `disease_scans` and served back
+  through an auth-scoped `/api/disease/scans/:id/image` route with a private
+  one-hour cache and `Vary: Cookie` (so switching accounts cannot reuse it).
+
+**AI analysis**
+
+- `src/lib/disease-ai.ts` sends the photo + crop/part/note to Gemini Vision
+  (`gemini-3.8-flash`, JSON mode) with a 40 s timeout. The prompt asks for a
+  cautious diagnosis, visible symptoms, causes, immediate actions, organic and
+  general chemical options, prevention and look-alikes — never a pesticide dose.
+- If Gemini fails and `GROQ_API_KEY` exists, the same photo goes to Groq's
+  OpenAI-compatible vision endpoint (18 s timeout) as a fallback.
+- With neither provider available, or when both fail, the route returns
+  `502 DISEASE_AI_UNAVAILABLE`; **nothing is saved**. No fake diagnosis.
+- Model replies are normalised (`86` confidence → `0.86`, common synonyms for
+  health status/pathogen/severity, arrays trimmed and de-duplicated) before the
+  scan is inserted.
+
+**UI**
+
+- `/detect` (`PlantDoctorView`, `DiseaseResultCard`, `DiseaseHistory`) follows
+  the existing Field Ops design: dark 4:3 capture surface with a sweeping scan
+  line, camera/upload actions, crop select from the farmer's own crops plus
+  common presets, six plant-part pills, optional note with counter.
+- The result card shows a coloured healthy/diseased/uncertain banner, confidence
+  bar, pathogen/severity/part/source chips, scanned image, "what the scan shows",
+  numbered "do this now" actions, organic and chemical blocks (with a safety
+  note), prevention, look-alikes and the AI-check disclaimer. Low confidence
+  (<45%) explicitly asks for a closer photo.
+- Recent scans show private thumbnails, status dot, disease/crop/part,
+  confidence, time, click-to-open and inline two-step delete.
+- The rail/dock gained a fifth **Scan** item; the mobile dock stays 5-up with no
+  horizontal overflow. Odia labels were added for the new UI strings.
+
+**Database**
+
+- `disease_scans` (migration `0005_greedy_thor_girl.sql`): farmer FK (cascade),
+  optional crop FK (`set null`), crop/part/note, image MIME + base64, health
+  status, disease/pathogen/severity, confidence, summary and seven JSON string
+  arrays, source/model and timestamps. Indexes on `(farmer_id, created_at)` and
+  `crop_id`. `npm run db:push` applied it to Neon branch `production`.
+
+**Environment**
+
+- `GEMINI_API_KEY` now also powers the plant doctor. Optional:
+  `DISEASE_GEMINI_TIMEOUT_MS`, `GEMINI_BASE_URL`, `GROQ_DISEASE_MODEL`,
+  `GROQ_DISEASE_TIMEOUT_MS`.
+
+**Verification**
+
+```
+npx tsc --noEmit   → 0 errors
+npm run lint       → 0 errors (2 pre-existing warnings: watch ref cleanup, i18n exact)
+npm run build      → succeeds (28 routes; /detect + 4 disease APIs dynamic)
+npm run db:push    → 0005 applied
+```
+
+- API e2e on the production build: register test farmer → create farm → upload a
+  138 KB tomato late-blight leaf photo → `201` scan (`Late blight`, fungal, high,
+  0.86) → list → image `200 image/jpeg` → delete `200` → test rows removed.
+- UI e2e in headless Chromium at 1440 px and 430 px: upload → analyse → result
+  card, history, no console errors, no horizontal overflow.
+- **Network note:** this sandbox could not reach `generativelanguage.googleapis.com`
+  (direct REST/SDK calls timed out), so the provider response was verified
+  end-to-end against a local Gemini-format mock. The timeout above prevents the
+  API hanging in this situation; on a normal network the same code path calls
+  Gemini directly.
+
+**Files added / changed**
+
+| Area | Files |
+| --- | --- |
+| Page | `src/app/(dashboard)/detect/page.tsx` |
+| UI | `src/components/disease/PlantDoctorView.tsx`, `DiseaseResultCard.tsx`, `DiseaseHistory.tsx` |
+| APIs | `src/app/api/disease/detect/route.ts`, `src/app/api/disease/scans/route.ts`, `scans/[id]/route.ts`, `scans/[id]/image/route.ts` |
+| AI / data | `src/lib/disease.ts`, `disease-ai.ts`, `disease-queries.ts`, `image.ts` |
+| Data | `src/db/schema.ts`, `drizzle/0005_greedy_thor_girl.sql` |
+| Client | `src/lib/api-client.ts`, `src/components/crops/CropsView.tsx` (scan link), `src/components/layout/AppNav.tsx` |
+| i18n / style | `src/lib/i18n/dictionary/disease.ts`, dictionary index, `src/app/globals.css` |
+| Docs / config | `.env.example`, `README.md`, `ARCHITECTURE.md`, `DATABASE_SCHEMA.md`, this file |
+
+---
+
+## 13. Persistent camera alarms + steadier detection (10 Nov 2026)
+
+**Why**
+
+The first alarm build only showed the newest event for a moment and could stop
+the siren on its own; a dropped poll, an ended session or an AI disagreement
+could silently silence a real intrusion. Detection also weakened when the phone
+moved. This pass makes alarms impossible to miss and keeps tracking usable while
+the camera shakes or pans.
+
+**Alarms that never stop themselves**
+
+- One `CameraAlarmBanner` manager is mounted in the dashboard layout, so moving
+  between dashboard pages no longer unmounts the siren.
+- Every unresolved alarm is a separate popup (`role="log"`, assertive live
+  region) and the continuous two-carrier siren plays until a human stops it.
+  A failed poll, an ended camera, a Groq refutation or an expired login keeps
+  the alarm ringing and shows a status line instead of clearing it.
+- **Stop siren** silences audio immediately and acknowledges only the snapshot
+  that was on screen (`throughId`); a newer alarm that arrived simultaneously
+  keeps ringing. Dismissing one popup acknowledges just that alarm.
+- Account-scoped latches + dismissal tombstones live in `localStorage`
+  (`camera-alarm-inbox.ts`), so a reload restores unresolved alarms and keeps
+  stopped ones muted even when the network never confirms the acknowledgement.
+  Stored alarms are pre-marked as seen so a reload does not re-fire OS popups.
+- The server no longer suppresses alarms with a cooldown, and a Groq refutation
+  keeps the row for human review ("AI could not confirm; please review") instead
+  of retracting it. Retried uploads return the unread receipt again, and a
+  missing alarm row for an existing detection is repaired.
+- Notification permission is separate from siren muting; in-app popups need no
+  permission. Native notifications are an open-app fallback (service worker
+  click focuses the dashboard instead of reloading).
+
+**Steadier detection and camera movement**
+
+- `camera-tracker.ts` matches with velocity-aware gating, confirmation votes and
+  frame-relative motion so a pan does not relabel a person as a new track.
+  `camera-motion.ts` estimates translation and exposure and only alarms on the
+  residual.
+- Confirmed event frames are frozen and reserved synchronously in
+  `camera-event-buffer.ts` (max 32), surviving stops, flips, failed encodes and
+  camera restarts; detection pauses at capacity instead of dropping evidence.
+- `camera-capture.ts` encodes frozen frames with an 8 s timeout and optional
+  cancellation; `camera-preview.ts` validates frame versions/dimensions and
+  cleans up object URLs. Watch polling/decoding is serialised and fenced so
+  stale responses cannot overwrite newer state.
+
+**Verification**
+
+```
+npm run test:camera   → 51 tests, 0 failures (node:test + PGlite)
+npx tsc --noEmit      → 0 errors
+npm run lint          → 0 errors (2 pre-existing warnings)
+npm run build         → succeeds (28 routes)
+npm run dev           → all routes compile; /login, /watch, /camera, /, /map, /crops, /detect return 200
+```
+
+- The PGlite suite exercises alarm pagination/totals/dismissal filters,
+  ingestion dedupe/repair, Groq review, frame versioning and stopped-session
+  fences against a local database — no remote writes.
+- No real-camera accuracy or physical-loudness test was run, and browser UI
+  inspection was skipped because this sandbox has no signed-in session.
+
+**Files added / changed**
+
+| Area | Files |
+| --- | --- |
+| Alarm UI | `src/components/watch/CameraAlarmBanner.tsx`, `src/app/(dashboard)/layout.tsx` |
+| Alarm data | `src/lib/camera-alarm-inbox.ts`, `src/lib/camera-alert-request.ts`, `src/lib/camera-queries.ts`, `src/app/api/camera/alerts/route.ts` |
+| Audio / native | `src/lib/alarm.ts`, `public/alarm-notifications-sw.js` |
+| Camera pipeline | `src/components/camera/CameraStreamView.tsx`, `src/components/watch/WatchView.tsx`, `src/lib/camera-tracker.ts`, `camera-motion.ts`, `camera-capture.ts`, `camera-event-buffer.ts`, `camera-preview.ts` |
+| Tests | `tests/camera/*.test.ts`, `package.json` (`test:camera`) |
+| i18n / docs | `src/lib/i18n/dictionary/watch.ts`, `camera.ts`, `patterns.ts`, `LIVE_CAMERA.md` |
+

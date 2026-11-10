@@ -1,10 +1,11 @@
 # AgroAI - Neon Postgres Database Schema
 
-> **Current as of 27 Oct 2026.** The old `intrusion_alerts` table (simulated
+> **Current as of 10 Nov 2026.** The old `intrusion_alerts` table (simulated
 > predator/fire alerts) was removed in migration
 > `0003_remove_simulated_alerts.sql`. Live detections live in
 > `camera_detections`, and confirmed human/animal events raise rows in
-> `camera_alerts` (migration `0004_first_wolfsbane.sql`).
+> `camera_alerts` (migration `0004_first_wolfsbane.sql`). Plant-photo diagnosis
+> history lives in `disease_scans` (migration `0005_greedy_thor_girl.sql`).
 
 ## 1. Drizzle ORM Schema (`src/db/schema.ts`)
 
@@ -130,6 +131,38 @@ export const weeklyReports = pgTable('weekly_reports', {
   aiActionPlan: text('ai_action_plan').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// 8. Plant-health scans (one row per photo)
+export const diseaseScans = pgTable('disease_scans', {
+  id: serial('id').primaryKey(),
+  farmerId: integer('farmer_id').notNull()
+    .references(() => farmers.id, { onDelete: 'cascade' }),
+  cropId: integer('crop_id').references(() => crops.id, { onDelete: 'set null' }),
+  cropName: text('crop_name'),
+  plantPart: text('plant_part').notNull().default('leaf'),
+  note: text('note'), // farmer's optional context, max 400 chars
+  imageMime: text('image_mime').notNull().default('image/jpeg'),
+  imageData: text('image_data').notNull(), // base64 JPEG/PNG/WebP
+  healthStatus: text('health_status').notNull(), // healthy | diseased | uncertain
+  diseaseName: text('disease_name'),
+  pathogenType: text('pathogen_type').notNull().default('unknown'),
+  severity: text('severity').notNull().default('unknown'), // none | low | moderate | high | unknown
+  confidence: doublePrecision('confidence').notNull().default(0), // 0–1
+  summary: text('summary').notNull().default(''),
+  symptoms: jsonb('symptoms').notNull(), // string[]
+  causes: jsonb('causes').notNull(),
+  immediateActions: jsonb('immediate_actions').notNull(),
+  organicTreatment: jsonb('organic_treatment').notNull(),
+  chemicalTreatment: jsonb('chemical_treatment').notNull(),
+  prevention: jsonb('prevention').notNull(),
+  lookAlikes: jsonb('look_alikes').notNull(),
+  source: text('source').notNull().default('gemini'), // gemini | groq
+  model: text('model'),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => [
+  index('disease_scans_farmer_idx').on(table.farmerId, table.createdAt),
+  index('disease_scans_crop_idx').on(table.cropId),
+]);
 ```
 
 ## 2. Spatial calculations
@@ -156,6 +189,7 @@ camera session for the “Field context” panel.
 | `0002_live_camera_tables.sql` | Creates `camera_sessions` + `camera_detections`, indexes and FKs. |
 | `0003_remove_simulated_alerts.sql` | Drops the old `intrusion_alerts` table. |
 | `0004_first_wolfsbane.sql` | Adds `camera_alerts`; adds `confirmed` / `source` / `verified` to `camera_detections`. |
+| `0005_greedy_thor_girl.sql` | Creates `disease_scans` (photo + AI verdict + farmer index) with FKs to `farmers` and `crops`. |
 
 Apply with `npm run db:push` (uses the direct `DATABASE_URL_UNPOOLED`
 connection). `drizzle-kit generate` produces SQL; never migrate over the pooled
@@ -175,3 +209,17 @@ PgBouncer connection.
 - The Groq verifier may later relabel the species (`source = 'groq'`,
   `verified = true`) or retract the track and its alarm when it sees no human or
   animal in the frame.
+
+## 5. Plant-scan rules
+
+- One row per photo, scoped by `farmer_id`; the image bytes and delete endpoint
+  are only reachable through the signed-in session.
+- The browser downscales the long edge to 1000 px and re-encodes JPEG; the server
+  also checks the magic bytes, rejects anything over 2.5 MB, and accepts only
+  JPEG/PNG/WebP.
+- No scan is written when the AI provider is missing, times out or returns
+  unreadable JSON. The API returns `502 DISEASE_AI_UNAVAILABLE` instead.
+- `confidence` is normalised to 0–1 (an `86` reply becomes `0.86`) and the UI
+  shows a "take a closer photo" warning below 45%.
+- Deleting a scan removes the row and its stored image immediately; deleting a
+  crop only sets `crop_id` to null so the diagnosis history survives.

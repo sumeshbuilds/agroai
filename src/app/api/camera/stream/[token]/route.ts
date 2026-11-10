@@ -5,6 +5,7 @@ import { cameraSessions, getDb } from "@/db";
 import type { CameraIngestPayload } from "@/lib/camera";
 import {
   getCameraSessionByToken,
+  cameraSessionMetadataColumns,
   ingestCameraFrame,
   verifyCameraDetections,
 } from "@/lib/camera-queries";
@@ -131,7 +132,7 @@ export async function POST(request: Request, context: RouteContext) {
 
     const db = getDb();
     const rows = await db
-      .select()
+      .select(cameraSessionMetadataColumns)
       .from(cameraSessions)
       .where(eq(cameraSessions.token, token))
       .limit(1);
@@ -155,6 +156,9 @@ export async function POST(request: Request, context: RouteContext) {
         ? body.detections.slice(0, 12)
         : [],
     });
+    if (result.session.status === "ended") {
+      return fail("This stream was stopped from the dashboard.", 409, { code: "STREAM_STOPPED" });
+    }
 
     const verification = result.verification;
     if (verification && isGroqConfigured()) {

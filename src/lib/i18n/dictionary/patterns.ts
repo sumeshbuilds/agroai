@@ -49,6 +49,10 @@ export const PATTERNS: TranslationRule[] = [
     pattern: /^(.+) detected at (.+)$/,
     render: (m, t) => `${t(m[2])} ରେ ${t(m[1])} ଚିହ୍ନଟ`,
   },
+  {
+    pattern: /^(.+) — AI could not confirm; please review$/,
+    render: (m, t) => `${t(m[1])} — AI ନିଶ୍ଚିତ କରିପାରିଲା ନାହିଁ; ଦୟାକରି ସମୀକ୍ଷା କରନ୍ତୁ`,
+  },
 
   /* Weather warnings — titles */
   {

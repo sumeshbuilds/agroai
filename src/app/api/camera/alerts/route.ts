@@ -2,6 +2,7 @@ import { connection } from "next/server";
 
 import { getDb } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
+import { parseCameraAlarmAcknowledgement, parseCameraAlarmQuery } from "@/lib/camera-alert-request";
 import {
   acknowledgeAllCameraAlerts,
   acknowledgeCameraAlert,
@@ -22,23 +23,16 @@ export async function GET(request: Request) {
       return fail("Sign in to view camera alarms.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    const url = new URL(request.url);
-    const includeAcknowledged = url.searchParams.get("all") === "1";
-    const limit = Number(url.searchParams.get("limit") ?? 8);
-
-    const alerts = await listCameraAlerts(getDb(), farmer.id, {
-      includeAcknowledged,
-      limit: Number.isFinite(limit) ? limit : 8,
-    });
-
-    return ok({ alerts, unread: alerts.filter((alert) => !alert.acknowledgedAt).length });
+    const options = parseCameraAlarmQuery(new URL(request.url).searchParams);
+    if (!options) return fail("Invalid alarm cursor or dismissal filter.", 400);
+    return ok(await listCameraAlerts(getDb(), farmer.id, options));
   } catch (error) {
     return handleRouteError(error);
   }
 }
 
 /**
- * POST /api/camera/alerts — acknowledge one alarm (`{ id }`) or all (`{ all: true }`).
+ * Acknowledge one alarm, or the stopped snapshot (`{ all: true, throughId }`).
  */
 export async function POST(request: Request) {
   await connection();
@@ -49,26 +43,23 @@ export async function POST(request: Request) {
       return fail("Sign in to update camera alarms.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    let body: { id?: number; all?: boolean } = {};
+    let input: unknown;
     try {
-      body = await readJson<{ id?: number; all?: boolean }>(request);
+      input = await readJson<unknown>(request);
     } catch {
-      // An empty body acknowledges everything.
+      return fail("Send an alarm id or a snapshot to acknowledge.", 400);
     }
 
+    const body = parseCameraAlarmAcknowledgement(input);
+    if (!body) return fail("Send a valid alarm id, or all: true with a valid throughId snapshot.", 400);
     const db = getDb();
 
-    if (body.all || body.id === undefined) {
-      const acknowledged = await acknowledgeAllCameraAlerts(db, farmer.id);
+    if (body.all === true) {
+      const acknowledged = await acknowledgeAllCameraAlerts(db, farmer.id, body.throughId);
       return ok({ acknowledged, all: true });
     }
 
-    const id = Number(body.id);
-    if (!Number.isInteger(id) || id <= 0) {
-      return fail("Invalid alarm id.", 400);
-    }
-
-    const acknowledged = await acknowledgeCameraAlert(db, id, farmer.id);
+    const acknowledged = await acknowledgeCameraAlert(db, body.id, farmer.id);
     if (!acknowledged) return fail("Alarm not found.", 404);
 
     return ok({ acknowledged: 1, all: false });

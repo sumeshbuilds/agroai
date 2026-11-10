@@ -38,16 +38,18 @@ import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { SectionHeading } from "@/components/ui/SectionHeading";
-import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
 import { ApiError, api } from "@/lib/api-client";
 import {
   CATEGORY_STYLES,
   cameraStats,
   type CameraDetectionDTO,
   type CameraSessionDTO,
-  type FrameDetection,
 } from "@/lib/camera";
 import { formatRelative } from "@/lib/format";
+import {
+  cameraFrameVersion, loadCameraPreviewFrame, snapshotFrameDetections,
+  type CameraPreviewFrame,
+} from "@/lib/camera-preview";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useI18n } from "@/lib/i18n";
 import { CAMERA_WATCH_RADIUS_KM } from "@/lib/map";
@@ -88,6 +90,7 @@ export function WatchView() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [detail, setDetail] = useState<SessionDetail | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [previewFrame, setPreviewFrame] = useState<CameraPreviewFrame | null>(null);
   const [networkIps, setNetworkIps] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -103,10 +106,54 @@ export function WatchView() {
   const [clock, setClock] = useState(0);
 
   const selectedRef = useRef<number | null>(null);
+  const activeRef = useRef(false);
+  const mutationRef = useRef(false);
+  const epochRef = useRef(0);
+  const sessionsControllerRef = useRef<AbortController | null>(null);
+  const detailControllerRef = useRef<AbortController | null>(null);
+  const sessionsRequestRef = useRef<Promise<void> | null>(null);
+  const detailRequestRef = useRef<{ id: number; promise: Promise<void> } | null>(null);
+  const previewRef = useRef<CameraPreviewFrame | null>(null);
+  const ownedUrlsRef = useRef(new Set<string>());
+  const copiedTimerRef = useRef(0);
 
   useEffect(() => {
-    selectedRef.current = selectedId;
-  }, [selectedId]);
+    activeRef.current = true;
+    const urls = ownedUrlsRef.current;
+    return () => {
+      activeRef.current = false;
+      epochRef.current += 1;
+      sessionsControllerRef.current?.abort();
+      detailControllerRef.current?.abort();
+      window.clearTimeout(copiedTimerRef.current);
+      urls.forEach((url) => URL.revokeObjectURL(url));
+      urls.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    const src = previewFrame?.src;
+    const urls = ownedUrlsRef.current;
+    return () => {
+      if (src && urls.delete(src)) URL.revokeObjectURL(src);
+    };
+  }, [previewFrame?.src]);
+
+  const selectSession = useCallback((id: number | null) => {
+    if (selectedRef.current === id) return;
+    selectedRef.current = id;
+    detailControllerRef.current?.abort();
+    previewRef.current = null;
+    setPreviewFrame(null);
+    setDetailError(null);
+    setSelectedId(id);
+  }, []);
+
+  const commitPreview = useCallback((frame: CameraPreviewFrame) => {
+    ownedUrlsRef.current.add(frame.src);
+    previewRef.current = frame;
+    setPreviewFrame(frame);
+  }, []);
 
   const activeDetail = detail?.session.id === selectedId ? detail : null;
   const selectedSession =
@@ -114,48 +161,96 @@ export function WatchView() {
 
   // ---- data loading ------------------------------------------------------
   const loadSessions = useCallback(async (silent = false) => {
-    try {
-      const data = await api.listCameraSessions();
-      setSessions(data.sessions);
-      setNeedsSetup(false);
-      setError(null);
-      setSelectedId((current) => {
-        if (current && data.sessions.some((s) => s.id === current)) return current;
-        return (
-          data.sessions.find((s) => s.isLive)?.id ??
-          data.sessions[0]?.id ??
-          null
-        );
-      });
-    } catch (cause) {
-      if (cause instanceof ApiError && cause.code === "DB_NOT_CONFIGURED") {
-        setNeedsSetup(true);
+    if (!activeRef.current || mutationRef.current) return;
+    if (sessionsRequestRef.current) return sessionsRequestRef.current;
+    const controller = new AbortController();
+    sessionsControllerRef.current = controller;
+    const epoch = epochRef.current;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 12_000);
+    const task = (async () => {
+      try {
+        const data = await api.listCameraSessions({ signal: controller.signal });
+        if (!activeRef.current || controller.signal.aborted || epoch !== epochRef.current) return;
+        setSessions(data.sessions);
+        setNeedsSetup(false);
+        setError(null);
+        const current = selectedRef.current;
+        if (current === null || !data.sessions.some((session) => session.id === current)) {
+          selectSession(data.sessions.find((session) => session.isLive)?.id ?? data.sessions[0]?.id ?? null);
+        }
+      } catch (cause) {
+        if (!activeRef.current || epoch !== epochRef.current || (controller.signal.aborted && !timedOut)) return;
+        if (cause instanceof ApiError && cause.code === "DB_NOT_CONFIGURED") setNeedsSetup(true);
+        setError(silent ? "Camera list connection lost. Previously loaded cameras are kept; tap Refresh to retry."
+          : cause instanceof Error ? cause.message : "Could not load camera sessions.");
+      } finally {
+        window.clearTimeout(timeout);
+        if (sessionsControllerRef.current === controller) {
+          sessionsControllerRef.current = null;
+          sessionsRequestRef.current = null;
+        }
+        if (activeRef.current) setSessionsLoading(false);
       }
-      if (!silent) {
-        setError(
-          cause instanceof Error ? cause.message : "Could not load camera sessions.",
-        );
-      }
-    } finally {
-      setSessionsLoading(false);
-    }
-  }, []);
+    })();
+    sessionsRequestRef.current = task;
+    return task;
+  }, [selectSession]);
 
   const loadDetail = useCallback(async (id: number, silent = false) => {
-    try {
-      const data = await api.getCameraSession(id);
-      if (selectedRef.current !== id) return;
-      setDetail(data);
-      setDetailError(null);
-    } catch (cause) {
-      if (selectedRef.current !== id) return;
-      if (!silent) {
-        setDetailError(
-          cause instanceof Error ? cause.message : "Could not load this camera.",
-        );
+    if (!activeRef.current || mutationRef.current || selectedRef.current !== id) return;
+    if (detailRequestRef.current?.id === id && !detailControllerRef.current?.signal.aborted) return detailRequestRef.current.promise;
+    detailControllerRef.current?.abort();
+    const controller = new AbortController();
+    detailControllerRef.current = controller;
+    const epoch = epochRef.current;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 12_000);
+    const accept = () => activeRef.current && !controller.signal.aborted && selectedRef.current === id && epoch === epochRef.current;
+    const task = (async () => {
+      try {
+        // At most one metadata+JPEG operation per camera. A superseded image
+        // gets one immediate metadata refresh, not an overlapping poll storm.
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          const data = await api.getCameraSession(id, { signal: controller.signal });
+          if (!accept()) return;
+          setDetail(data);
+          const version = cameraFrameVersion(data.session);
+          const current = previewRef.current;
+          if (!version) { setDetailError(null); return; }
+          if (current?.sessionId === id && current.version === version) {
+            commitPreview({ ...current, detections: snapshotFrameDetections(data.session.latestDetections) });
+            setDetailError(null);
+            return;
+          }
+          try {
+            const frame = await loadCameraPreviewFrame(data.session, controller.signal);
+            if (!accept()) { URL.revokeObjectURL(frame.src); return; }
+            commitPreview(frame);
+            setDetailError(null);
+            return;
+          } catch (cause) {
+            if (cause instanceof ApiError && cause.code === "FRAME_SUPERSEDED" && attempt === 0) continue;
+            throw cause;
+          }
+        }
+      } catch (cause) {
+        if (!activeRef.current || selectedRef.current !== id || epoch !== epochRef.current || (controller.signal.aborted && !timedOut)) return;
+        setDetailError(cause instanceof ApiError && cause.code === "FRAME_SUPERSEDED"
+          ? "A newer snapshot is arriving. The previous matching image and boxes are kept."
+          : silent ? "Camera connection lost. The previous matching image and boxes are kept; tap Refresh to retry."
+          : cause instanceof Error ? cause.message : "Could not load this camera.");
+      } finally {
+        window.clearTimeout(timeout);
+        if (detailControllerRef.current === controller) {
+          detailControllerRef.current = null;
+          detailRequestRef.current = null;
+        }
       }
-    }
-  }, []);
+    })();
+    detailRequestRef.current = { id, promise: task };
+    return task;
+  }, [commitPreview]);
 
   const refreshNow = async () => {
     setRefreshing(true);
@@ -165,39 +260,71 @@ export function WatchView() {
         await loadDetail(selectedRef.current, true);
       }
     } finally {
-      setRefreshing(false);
+      if (activeRef.current) setRefreshing(false);
     }
   };
 
   useEffect(() => {
-    const kickoff = window.setTimeout(() => void loadSessions(), 0);
-    const timer = window.setInterval(() => void loadSessions(true), 8000);
+    let stopped = false;
+    let timer = 0;
+    const tick = async (silent = true) => {
+      await loadSessions(silent);
+      if (!stopped) timer = window.setTimeout(() => void tick(), 8_000);
+    };
+    timer = window.setTimeout(() => void tick(false), 0);
+    const retry = () => {
+      if (!sessionsRequestRef.current && !mutationRef.current) {
+        window.clearTimeout(timer);
+        void tick();
+      }
+    };
+    window.addEventListener("online", retry);
     return () => {
-      window.clearTimeout(kickoff);
-      window.clearInterval(timer);
+      stopped = true;
+      window.clearTimeout(timer);
+      sessionsControllerRef.current?.abort();
+      window.removeEventListener("online", retry);
     };
   }, [loadSessions]);
 
   useEffect(() => {
+    let active = true;
     api
       .getCameraNetwork()
-      .then((data) =>
-        setNetworkIps(
+      .then((data) => {
+        if (active) setNetworkIps(
           data.addresses
             .map((entry) => entry.address)
             .sort((a, b) => lanScore(b) - lanScore(a)),
-        ),
-      )
+        );
+      })
       .catch(() => undefined);
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
     if (selectedId === null) return;
-    const kickoff = window.setTimeout(() => void loadDetail(selectedId), 0);
-    const timer = window.setInterval(() => void loadDetail(selectedId, true), pollMs);
+    let stopped = false;
+    let timer = 0;
+    const tick = async (silent = true) => {
+      await loadDetail(selectedId, silent);
+      if (!stopped) timer = window.setTimeout(() => void tick(), document.visibilityState === "visible" ? pollMs : 5_000);
+    };
+    timer = window.setTimeout(() => void tick(false), 0);
+    const retry = () => {
+      if (document.visibilityState === "visible" && !detailRequestRef.current && !mutationRef.current) {
+        window.clearTimeout(timer);
+        void tick();
+      }
+    };
+    document.addEventListener("visibilitychange", retry);
+    window.addEventListener("online", retry);
     return () => {
-      window.clearTimeout(kickoff);
-      window.clearInterval(timer);
+      stopped = true;
+      window.clearTimeout(timer);
+      detailControllerRef.current?.abort();
+      document.removeEventListener("visibilitychange", retry);
+      window.removeEventListener("online", retry);
     };
   }, [selectedId, loadDetail, pollMs]);
 
@@ -265,32 +392,47 @@ export function WatchView() {
   const phoneIsSecure = phoneUrl.startsWith("https://");
 
   // ---- actions -----------------------------------------------------------
+  const beginMutation = () => {
+    if (mutationRef.current) return false;
+    mutationRef.current = true;
+    epochRef.current += 1;
+    sessionsControllerRef.current?.abort();
+    detailControllerRef.current?.abort();
+    return true;
+  };
+  const finishMutation = () => { mutationRef.current = false; epochRef.current += 1; };
+
   const createSession = async () => {
+    if (!beginMutation()) return;
     setCreating(true);
     setNotice(null);
     setError(null);
     try {
       const name = `Field camera ${sessions.length + 1}`;
       const { session } = await api.createCameraSession(name);
+      if (!activeRef.current) return;
       setSessions((current) => [session, ...current]);
-      setSelectedId(session.id);
+      selectSession(session.id);
       setDetail({ session, detections: [] });
       setNotice("Camera paired. Scan the QR code with your phone.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not create the camera.");
+      if (activeRef.current) setError(cause instanceof Error ? cause.message : "Could not create the camera.");
     } finally {
-      setCreating(false);
+      finishMutation();
+      if (activeRef.current) setCreating(false);
     }
   };
 
   const setStatus = async (status: "live" | "ended") => {
-    if (!selectedSession) return;
+    if (!selectedSession || !beginMutation()) return;
+    const id = selectedSession.id;
     setBusy(status);
     setNotice(null);
     try {
-      const { session } = await api.updateCameraSession(selectedSession.id, {
+      const { session } = await api.updateCameraSession(id, {
         status,
       });
+      if (!activeRef.current) return;
       setDetail((current) =>
         current && current.session.id === session.id
           ? { ...current, session }
@@ -306,13 +448,15 @@ export function WatchView() {
       );
       if (status === "ended") {
         setDetail((current) =>
-          current ? { ...current, session: { ...current.session, latestDetections: [] } } : current,
+          current?.session.id === id ? { ...current, session: { ...current.session, latestDetections: [] } } : current,
         );
+        if (previewRef.current?.sessionId === id) commitPreview({ ...previewRef.current, detections: [] });
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not update the camera.");
+      if (activeRef.current) setError(cause instanceof Error ? cause.message : "Could not update the camera.");
     } finally {
-      setBusy(null);
+      finishMutation();
+      if (activeRef.current) setBusy(null);
     }
   };
 
@@ -321,18 +465,22 @@ export function WatchView() {
     if (!window.confirm(t("Delete “{name}” and its detection history?", { name: selectedSession.name }))) {
       return;
     }
+    if (!beginMutation()) return;
+    const id = selectedSession.id;
     setBusy("delete");
     try {
-      await api.deleteCameraSession(selectedSession.id);
-      const remaining = sessions.filter((item) => item.id !== selectedSession.id);
-      setSessions(remaining);
-      setSelectedId(remaining[0]?.id ?? null);
-      setDetail(null);
+      await api.deleteCameraSession(id);
+      if (!activeRef.current) return;
+      const remaining = sessions.filter((item) => item.id !== id);
+      setSessions((current) => current.filter((item) => item.id !== id));
+      if (selectedRef.current === id) selectSession(remaining[0]?.id ?? null);
+      setDetail((current) => current?.session.id === id ? null : current);
       setNotice("Camera removed.");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Could not delete the camera.");
+      if (activeRef.current) setError(cause instanceof Error ? cause.message : "Could not delete the camera.");
     } finally {
-      setBusy(null);
+      finishMutation();
+      if (activeRef.current) setBusy(null);
     }
   };
 
@@ -340,21 +488,24 @@ export function WatchView() {
     if (!phoneUrl) return;
     try {
       await navigator.clipboard.writeText(phoneUrl);
+      if (!activeRef.current) return;
       setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
+      window.clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = window.setTimeout(() => setCopied(false), 1800);
     } catch {
       setError("Clipboard blocked. Select the link and copy it manually.");
     }
   };
 
-  const liveDetections = selectedSession?.latestDetections ?? [];
+  const activePreview = previewFrame?.sessionId === selectedId ? previewFrame : null;
+  const liveDetections = activePreview?.detections ?? [];
   const stats = cameraStats(liveDetections);
   const frameAge =
-    selectedSession?.frameUpdatedAt && clock > 0
+    activePreview?.capturedAt && clock > 0
       ? Math.max(
           0,
           Math.round(
-            (clock - new Date(selectedSession.frameUpdatedAt).getTime()) / 1000,
+            (clock - new Date(activePreview.capturedAt).getTime()) / 1000,
           ),
         )
       : null;
@@ -403,7 +554,7 @@ export function WatchView() {
             <RefreshCw className="h-4 w-4" />
             {t("Refresh")}
           </Button>
-          <Button onClick={createSession} loading={creating}>
+           <Button onClick={createSession} loading={creating} disabled={busy !== null}>
             <Plus className="h-4 w-4" />
             {t("Pair a phone")}
           </Button>
@@ -415,8 +566,6 @@ export function WatchView() {
 
       {notice ? <Callout tone="success" className="mb-3">{t(notice)}</Callout> : null}
       {error ? <Callout tone="danger" className="mb-3">{t(error)}</Callout> : null}
-
-      <CameraAlarmBanner intervalMs={4_000} />
 
       {sessionsLoading && sessions.length === 0 ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -431,7 +580,7 @@ export function WatchView() {
             "Tap “Pair a phone”, scan the QR code on your mobile, then point the rear camera at the demo field. People and animals show up here with live boxes and movement direction.",
           )}
           action={
-            <Button onClick={createSession} loading={creating}>
+            <Button onClick={createSession} loading={creating} disabled={busy !== null}>
               <Smartphone className="h-4 w-4" />
               {t("Pair a phone camera")}
             </Button>
@@ -444,7 +593,7 @@ export function WatchView() {
               <button
                 key={session.id}
                 type="button"
-                onClick={() => setSelectedId(session.id)}
+                onClick={() => selectSession(session.id)}
                 aria-pressed={session.id === selectedId}
                 className={
                   session.id === selectedId
@@ -475,7 +624,7 @@ export function WatchView() {
 
               <LivePlayer
                 session={selectedSession}
-                detections={liveDetections}
+                frame={activePreview}
                 frameAge={frameAge}
               />
 
@@ -505,7 +654,7 @@ export function WatchView() {
                       ? t("Active")
                       : selectedSession?.status === "ended"
                         ? t("Stopped")
-                        : t("Motion")
+                         : t("Detection unavailable")
                   }
                 />
               </section>
@@ -697,8 +846,9 @@ export function WatchView() {
                       <div className="flex flex-wrap gap-2 border-t border-[var(--border)] pt-4">
                         {selectedSession.status === "ended" ? (
                           <Button
-                            onClick={() => void setStatus("live")}
-                            loading={busy === "live"}
+                             onClick={() => void setStatus("live")}
+                             loading={busy === "live"}
+                             disabled={creating || (busy !== null && busy !== "live")}
                           >
                             <Play className="h-4 w-4" />
                             {t("Restart stream")}
@@ -706,8 +856,9 @@ export function WatchView() {
                         ) : (
                           <Button
                             variant="secondary"
-                            onClick={() => void setStatus("ended")}
-                            loading={busy === "ended"}
+                             onClick={() => void setStatus("ended")}
+                             loading={busy === "ended"}
+                             disabled={creating || (busy !== null && busy !== "ended")}
                           >
                             <CameraOff className="h-4 w-4" />
                             {t("Stop stream")}
@@ -715,8 +866,9 @@ export function WatchView() {
                         )}
                         <Button
                           variant="ghost"
-                          onClick={() => void removeSession()}
-                          loading={busy === "delete"}
+                           onClick={() => void removeSession()}
+                           loading={busy === "delete"}
+                           disabled={creating || (busy !== null && busy !== "delete")}
                         >
                           <Trash2 className="h-4 w-4" />
                           {t("Delete")}
@@ -790,8 +942,8 @@ export function WatchView() {
                     label={t("Detector")}
                     value={
                       selectedSession?.aiEnabled
-                        ? t("On-device + Groq")
-                        : t("Motion assist")
+                         ? t("On-device AI; optional verification")
+                         : t("Detection unavailable")
                     }
                   />
                 </div>
@@ -869,29 +1021,31 @@ export function WatchView() {
 
 function LivePlayer({
   session,
-  detections,
+  frame,
   frameAge,
 }: {
   session: CameraSessionDTO | null;
-  detections: FrameDetection[];
+  frame: CameraPreviewFrame | null;
   frameAge: number | null;
 }) {
   const { t } = useI18n();
+  const detections = frame?.detections ?? [];
   return (
     <section className="camera-surface relative overflow-hidden rounded-2xl bg-slate-950 shadow-[var(--shadow-card)]" aria-label={t("Camera preview")}>
       <div
         className="relative aspect-[4/3] w-full sm:aspect-video"
         style={{
           aspectRatio:
-            session?.frameWidth && session?.frameHeight
-              ? `${session.frameWidth} / ${session.frameHeight}`
+            frame?.width && frame.height
+              ? `${frame.width} / ${frame.height}`
               : undefined,
         }}
       >
-        {session?.frameUrl ? (
+        {frame && session ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={session.frameUrl}
+            src={frame.src}
+            data-camera-frame-version={frame.version}
             alt={t("Live frame from {name}", { name: session.name })}
             className="absolute inset-0 h-full w-full object-contain"
           />
@@ -917,7 +1071,9 @@ function LivePlayer({
           return (
             <div
               key={detection.trackId}
-              className={`pointer-events-none absolute border-2 ${style.border}`}
+              data-camera-track-id={detection.trackId}
+              data-camera-frame-version={frame?.version}
+              className={`pointer-events-none absolute border-2 ${style.border} ${detection.coasting ? "border-dashed opacity-50" : ""}`}
               style={{
                 left: `${x * 100}%`,
                 top: `${y * 100}%`,
@@ -928,10 +1084,12 @@ function LivePlayer({
               }}
             >
               <span
-                className={`absolute -top-5 left-[-2px] inline-flex max-w-[160px] items-center gap-1 truncate rounded-t-md px-1.5 py-0.5 text-[10px] font-extrabold leading-none ${style.text}`}
+                className={`absolute inline-flex max-w-[160px] items-center gap-1 rounded-md px-1.5 py-1 text-xs font-semibold leading-none ${style.text}`}
+                style={{ top: y < 0.08 ? 0 : -24, left: x > 0.7 ? undefined : -2, right: x > 0.7 ? -2 : undefined }}
+                title={t(detection.label)}
               >
-                {detection.emoji} {t(detection.label)}
-                <span className="opacity-70">
+                <span className="truncate">{t(detection.label)}{detection.coasting ? ` · ${t("Predicted")}` : ""}</span>
+                <span className="shrink-0">
                   {Math.round(detection.confidence * 100)}%
                 </span>
               </span>
@@ -965,7 +1123,8 @@ function LivePlayer({
                   strokeWidth={0.35}
                   strokeDasharray="0.8 0.8"
                   strokeLinecap="round"
-                  vectorEffect="non-scaling-stroke"
+                   vectorEffect="non-scaling-stroke"
+                   opacity={detection.coasting ? 0.5 : 1}
                 />
               );
             })}
@@ -997,7 +1156,7 @@ function LivePlayer({
           ) : (
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-200 backdrop-blur">
               <Activity className="h-3 w-3" />
-              {t("Motion mode")}
+              {t("Video only")}
             </span>
           )}
         </div>
@@ -1007,7 +1166,7 @@ function LivePlayer({
             {detections.length === 0 ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[10px] font-semibold text-white/70 backdrop-blur">
                 <CircleDot className="h-3 w-3" />
-                {t("No objects in frame")}
+                {t(session?.aiEnabled ? "No detections in this snapshot" : "Detection unavailable")}
               </span>
             ) : (
               detections.slice(0, 4).map((detection) => (
@@ -1015,8 +1174,8 @@ function LivePlayer({
                   key={detection.trackId}
                   className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur"
                 >
-                  {detection.emoji} {t(detection.label)}
-                  <span className="text-white/60">
+                  {t(detection.label)}{detection.coasting ? ` · ${t("Predicted")}` : ""}
+                  <span className="text-white/80">
                     {Math.round(detection.confidence * 100)}%
                   </span>
                 </span>

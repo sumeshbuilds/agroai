@@ -6,12 +6,13 @@ import type {
   WeeklyReportDTO,
 } from "./types";
 import type {
-  CameraAlertDTO,
+  CameraAlertPage,
   CameraDetectionDTO,
   CameraIngestPayload,
   CameraIngestResponse,
   CameraSessionDTO,
 } from "./camera";
+import type { DiseaseScanDTO } from "./disease";
 import type { GeocodeResponse } from "./geocode";
 import type { PestRiskAssessment } from "./pest-risk";
 import type { WeatherSnapshot, WeatherWarning } from "./weather";
@@ -143,8 +144,11 @@ export const api = {
       `/api/pest-risk${cropId !== undefined ? `?cropId=${cropId}` : ""}`,
     ),
 
-  listCameraSessions: () =>
-    request<{ sessions: CameraSessionDTO[] }>("/api/camera/sessions"),
+  listCameraSessions: (options?: { signal?: AbortSignal }) =>
+    request<{ sessions: CameraSessionDTO[] }>("/api/camera/sessions", {
+      signal: options?.signal,
+      cache: "no-store",
+    }),
 
   createCameraSession: (name: string) =>
     request<{ session: CameraSessionDTO }>("/api/camera/sessions", {
@@ -152,11 +156,11 @@ export const api = {
       body: JSON.stringify({ name }),
     }),
 
-  getCameraSession: (id: number) =>
+  getCameraSession: (id: number, options?: { signal?: AbortSignal }) =>
     request<{
       session: CameraSessionDTO;
       detections: CameraDetectionDTO[];
-    }>(`/api/camera/sessions/${id}`),
+    }>(`/api/camera/sessions/${id}`, { signal: options?.signal, cache: "no-store" }),
 
   updateCameraSession: (
     id: number,
@@ -173,9 +177,10 @@ export const api = {
     }),
 
   /** Public (token-scoped) pairing info used by the phone page. */
-  getCameraPairing: (token: string) =>
+  getCameraPairing: (token: string, options?: { signal?: AbortSignal }) =>
     request<{ session: CameraSessionDTO; farmerName: string }>(
       `/api/camera/stream/${encodeURIComponent(token)}`,
+      { signal: options?.signal, cache: "no-store" },
     ),
 
   /**
@@ -186,6 +191,7 @@ export const api = {
     token: string,
     meta: Omit<CameraIngestPayload, "frame">,
     frame: Blob,
+    options?: { signal?: AbortSignal },
   ): Promise<CameraIngestResponse> => {
     const form = new FormData();
     form.append("meta", JSON.stringify(meta));
@@ -193,7 +199,7 @@ export const api = {
 
     const response = await fetch(
       `/api/camera/stream/${encodeURIComponent(token)}`,
-      { method: "POST", body: form },
+      { method: "POST", body: form, signal: options?.signal },
     );
 
     const payload = (await response.json().catch(() => null)) as
@@ -221,21 +227,32 @@ export const api = {
       },
     ),
 
-  listCameraAlerts: () =>
-    request<{ alerts: CameraAlertDTO[]; unread: number }>(
-      "/api/camera/alerts",
-    ),
+  listCameraAlerts: (options?: { limit?: number; beforeId?: number; afterId?: number; excludedIds?: number[]; includeAcknowledged?: boolean; signal?: AbortSignal }) => {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.beforeId !== undefined) params.set("before", String(options.beforeId));
+    if (options?.afterId) params.set("after", String(options.afterId));
+    if (options?.excludedIds?.length) params.set("exclude", options.excludedIds.join(","));
+    if (options?.includeAcknowledged) params.set("all", "1");
+    const query = params.toString();
+    return request<CameraAlertPage>(`/api/camera/alerts${query ? `?${query}` : ""}`, {
+      signal: options?.signal,
+      cache: "no-store",
+    });
+  },
 
-  acknowledgeCameraAlert: (id: number) =>
+  acknowledgeCameraAlert: (id: number, options?: { signal?: AbortSignal }) =>
     request<{ acknowledged: number; all: boolean }>("/api/camera/alerts", {
       method: "POST",
       body: JSON.stringify({ id }),
+      signal: options?.signal,
     }),
 
-  acknowledgeAllCameraAlerts: () =>
+  acknowledgeAllCameraAlerts: (throughId: number, options?: { signal?: AbortSignal }) =>
     request<{ acknowledged: number; all: boolean }>("/api/camera/alerts", {
       method: "POST",
-      body: JSON.stringify({ all: true }),
+      body: JSON.stringify({ all: true, throughId }),
+      signal: options?.signal,
     }),
 
   getCameraNetwork: () =>
@@ -258,5 +275,66 @@ export const api = {
     request<ReportGenerationResponse>("/api/cron/weekly-report", {
       method: "POST",
       body: JSON.stringify(cropId !== undefined ? { cropId } : {}),
+    }),
+
+  listDiseaseScans: (options?: {
+    limit?: number;
+    beforeId?: number;
+    signal?: AbortSignal;
+  }) => {
+    const params = new URLSearchParams();
+    if (options?.limit !== undefined) params.set("limit", String(options.limit));
+    if (options?.beforeId !== undefined)
+      params.set("before", String(options.beforeId));
+    const query = params.toString();
+    return request<{ scans: DiseaseScanDTO[] }>(
+      `/api/disease/scans${query ? `?${query}` : ""}`,
+      { signal: options?.signal, cache: "no-store" },
+    );
+  },
+
+  /** Uploads one plant photo (multipart) and returns the saved AI verdict. */
+  detectDisease: async (
+    input: {
+      image: Blob;
+      cropId?: number | null;
+      cropName?: string | null;
+      plantPart: string;
+      note?: string | null;
+    },
+    options?: { signal?: AbortSignal },
+  ): Promise<{ scan: DiseaseScanDTO }> => {
+    const form = new FormData();
+    form.append("image", input.image, "plant.jpg");
+    if (input.cropId) form.append("cropId", String(input.cropId));
+    if (input.cropName) form.append("cropName", input.cropName);
+    form.append("plantPart", input.plantPart);
+    if (input.note) form.append("note", input.note);
+
+    const response = await fetch("/api/disease/detect", {
+      method: "POST",
+      body: form,
+      signal: options?.signal,
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | ({ scan: DiseaseScanDTO } & { error?: string; code?: string })
+      | null;
+
+    if (!response.ok) {
+      throw new ApiError(
+        payload?.error ?? `Request failed (${response.status})`,
+        response.status,
+        payload?.code,
+      );
+    }
+
+    return payload as { scan: DiseaseScanDTO };
+  },
+
+  deleteDiseaseScan: (id: number, options?: { signal?: AbortSignal }) =>
+    request<{ removed: boolean }>(`/api/disease/scans/${id}`, {
+      method: "DELETE",
+      signal: options?.signal,
     }),
 };

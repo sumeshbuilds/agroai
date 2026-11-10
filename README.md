@@ -40,6 +40,13 @@ live field camera that recognises people and animals in near real time.
    ~20–60 KB at 0.7–2.6 s intervals, so it works on a normal mobile data
    connection. An optional Groq vision model double-checks new tracks.
    **The old fake `simulate` intrusion panel has been removed.**
+8. **Plant doctor (photo disease detection)** — `/detect` lets the farmer take a
+   photo (rear camera on a phone) or upload one of any affected plant part. The
+   browser compresses it, Gemini Vision identifies the most likely disease,
+   pest damage or nutrient problem, and the app returns a confidence score,
+   visible symptoms, immediate actions, low-cost/organic options, a cautious
+   chemical option and prevention advice. Every scan is saved with its photo in
+   the farmer's private history.
 
 ## Tech stack
 
@@ -48,7 +55,8 @@ live field camera that recognises people and animals in near real time.
 - **Database:** Neon Postgres + Drizzle ORM (`@neondatabase/serverless`)
 - **Maps:** Leaflet + react-leaflet with Esri World Imagery tiles
 - **Weather:** Open-Meteo (no API key)
-- **AI:** Google Gemini (`@google/generative-ai`)
+- **AI:** Google Gemini (`@google/generative-ai`) for weekly advisories and
+  plant-photo disease detection (optional Groq fallback)
 - **On-device vision:** TensorFlow.js (`tfjs-core`, `tfjs-converter`,
   `tfjs-backend-webgl`) + `@tensorflow-models/coco-ssd`
 - **Optional vision verifier:** Groq (`qwen/qwen3.8-27b`, OpenAI-compatible API)
@@ -86,11 +94,15 @@ Android Chrome insecure-origin flag. Full steps:
 | `DATABASE_URL_UNPOOLED` | Yes | Direct Neon string — used by Drizzle Kit for migrations. |
 | `AUTH_SECRET` | Yes in production | HMAC secret for the signed name + PIN session cookie. |
 | `AUTH_COOKIE_SECURE` | No | Set `false` only for local `next start` tests over http. |
-| `GEMINI_API_KEY` | No | Enables Gemini advisories; otherwise a rule-based fallback is used. |
+| `GEMINI_API_KEY` | Required for scans | Enables Gemini advisories and plant-photo disease detection; the weekly advisory still uses a rule-based fallback. |
 | `GEMINI_MODEL` | No | Overrides the model (default `gemini-3.8-flash`). |
-| `GROQ_API_KEY` | No | Enables the Groq vision verifier for new human/animal tracks. |
+| `DISEASE_GEMINI_TIMEOUT_MS` | No | Plant-scan Gemini timeout in ms (default `40000`, max `55000`). |
+| `GEMINI_BASE_URL` | No | Overrides the Gemini endpoint (proxy or local mock). |
+| `GROQ_API_KEY` | No | Enables the Groq vision verifier for camera tracks and the plant-doctor fallback. |
 | `GROQ_VISION_MODEL` | No | Overrides the verifier model (default `qwen/qwen3.8-27b`). |
-| `GROQ_TIMEOUT_MS` | No | Verifier timeout in ms (default `4500`, max `15000`). |
+| `GROQ_DISEASE_MODEL` | No | Plant-scan fallback model (default `qwen/qwen3.8-27b`). |
+| `GROQ_DISEASE_TIMEOUT_MS` | No | Plant-scan Groq timeout in ms (default `18000`, max `45000`). |
+| `GROQ_TIMEOUT_MS` | No | Camera verifier timeout in ms (default `4500`, max `15000`). |
 | `CRON_SECRET` | No | Protects `/api/cron/weekly-report`. |
 
 Weather, satellite imagery and the on-device detector need no API keys. The
@@ -116,14 +128,14 @@ on-device labels are used as-is and no frame leaves your server.
 ```
 src/
 ├─ app/
-│  ├─ (dashboard)/           # dashboard, /map, /crops, /watch (auth-gated)
+│  ├─ (dashboard)/           # dashboard, /map, /crops, /watch, /detect (auth-gated)
 │  ├─ camera/                # standalone phone camera page (token link)
 │  ├─ login/ onboarding/     # name + PIN login and 4-step signup
-│  ├─ api/                   # auth, farms, crops, weather, camera, reports, pest-risk, cron
+│  ├─ api/                   # auth, farms, crops, weather, camera, disease, reports, pest-risk, cron
 │  ├─ layout.tsx, manifest.ts, not-found.tsx, globals.css
-├─ components/               # auth, map, weather, crops, camera, watch, dashboard, ui
+├─ components/               # auth, map, weather, crops, camera, watch, disease, dashboard, ui
 ├─ db/                       # Drizzle schema + lazy client
-└─ lib/                      # auth, camera, camera-queries, groq, alarm, crop-guide, pest-risk, geo, weather, gemini, queries
+└─ lib/                      # auth, camera, disease*, groq, alarm, crop-guide, pest-risk, geo, weather, gemini, queries
 drizzle/                     # generated SQL migrations
 ```
 
@@ -140,6 +152,10 @@ drizzle/                     # generated SQL migrations
 | `GET` / `POST` | `/api/camera/stream/:token` | Public token-scoped pairing + frame ingest (multipart or JSON). |
 | `GET` / `POST` | `/api/camera/alerts` | Unread human/animal alarms (`?all=1` for history); acknowledge one or all. |
 | `GET` | `/api/camera/network` | LAN IPv4 addresses for the phone QR link. |
+| `POST` | `/api/disease/detect` | Plant-photo scan (multipart image + crop/part/note); returns the saved AI verdict. |
+| `GET` | `/api/disease/scans` | The farmer's recent scans (`?limit=18&before=id`). |
+| `DELETE` | `/api/disease/scans/:id` | Remove a saved scan. |
+| `GET` | `/api/disease/scans/:id/image` | The auth-scoped scan JPEG. |
 | `GET` | `/api/reports` | List weekly reports. |
 | `GET` / `POST` | `/api/cron/weekly-report` | Generate weekly advisories. |
 

@@ -7,6 +7,7 @@ import {
   Leaf,
   Map as MapIcon,
   Radar,
+  ScanLine,
   Sprout,
 } from "lucide-react";
 
@@ -17,6 +18,7 @@ import { useI18n } from "@/lib/i18n";
 
 const LINKS = [
   { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/detect", label: "Scan", icon: ScanLine },
   { href: "/map", label: "Field map", icon: MapIcon },
   { href: "/watch", label: "Watch", icon: Radar },
   { href: "/crops", label: "Crops", icon: Sprout },
@@ -113,7 +115,7 @@ export function AppMobile() {
         aria-label={t("Primary")}
         className="fixed inset-x-4 bottom-[calc(1rem+env(safe-area-inset-bottom))] z-[1000]"
       >
-        <div className="dock mx-auto grid w-full max-w-sm grid-cols-4 gap-1 p-1.5">
+        <div className="dock mx-auto grid w-full max-w-sm grid-cols-5 gap-1 p-1.5">
           {LINKS.map(({ href, label, icon: Icon }) => {
             const active = isActive(href);
             return (

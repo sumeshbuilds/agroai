@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 
-import { and, desc, eq, gte, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, getTableColumns, gt, inArray, isNull, lt, lte, ne, notInArray, sql } from "drizzle-orm";
 
 import {
   cameraAlerts,
@@ -23,6 +23,7 @@ import {
   normaliseSpecies,
   objectMeta,
   type CameraAlertDTO,
+  type CameraAlertPage,
   type CameraDetectionDTO,
   type CameraIngestPayload,
   type CameraSessionDTO,
@@ -36,7 +37,12 @@ import {
 import { verifyFrameWithGroq, type GroqVerdict } from "./groq";
 
 const MAX_DETECTIONS_PER_FRAME = 12;
-const MAX_ALERTS_PER_FRAME = 4;
+
+/** Poll metadata without transferring the stored base64 JPEG from Postgres. */
+export const cameraSessionMetadataColumns = {
+  ...getTableColumns(cameraSessions),
+  latestFrame: sql<null>`null`.as("latest_frame"),
+};
 
 function toIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -109,7 +115,7 @@ function toCameraSessionDTO(
     lat: session.lat,
     lng: session.lng,
     motion: session.motion ?? 0,
-    latestDetections: liveDetections(session.latestDetections),
+    latestDetections: session.status === "ended" ? [] : liveDetections(session.latestDetections),
     totalDetections: session.totalDetections ?? 0,
     frameWidth: session.frameWidth ?? null,
     frameHeight: session.frameHeight ?? null,
@@ -158,6 +164,7 @@ function toAlertDTO(alert: CameraAlert, sessionName: string): CameraAlertDTO {
     message: alert.message,
     source: (alert.source as DetectionSource) ?? "on-device",
     verified: alert.verified,
+    reviewStatus: alert.verified ? "confirmed" : alert.source === "groq" ? "unconfirmed" : "pending",
     lat: alert.lat,
     lng: alert.lng,
     createdAt: toIso(alert.createdAt),
@@ -201,7 +208,7 @@ export async function listCameraSessions(
   limit = 12,
 ): Promise<CameraSessionDTO[]> {
   const rows = await db
-    .select()
+    .select(cameraSessionMetadataColumns)
     .from(cameraSessions)
     .where(eq(cameraSessions.farmerId, farmerId))
     .orderBy(desc(cameraSessions.createdAt))
@@ -217,7 +224,7 @@ export async function getCameraSession(
   farmerId: number,
 ): Promise<{ session: CameraSessionDTO; detections: CameraDetectionDTO[] } | null> {
   const rows = await db
-    .select()
+    .select(cameraSessionMetadataColumns)
     .from(cameraSessions)
     .where(
       and(eq(cameraSessions.id, id), eq(cameraSessions.farmerId, farmerId)),
@@ -256,14 +263,17 @@ export async function updateCameraSession(
   const values: Partial<typeof cameraSessions.$inferInsert> = {};
   if (input.status) {
     values.status = input.status;
-    if (input.status === "ended") values.endedAt = new Date();
+    if (input.status === "ended") {
+      values.endedAt = new Date();
+      values.latestDetections = [];
+    }
     if (input.status === "live") values.endedAt = null;
   }
   if (input.name) values.name = input.name;
 
   if (Object.keys(values).length === 0) {
     const rows = await db
-      .select()
+      .select(cameraSessionMetadataColumns)
       .from(cameraSessions)
       .where(
         and(eq(cameraSessions.id, id), eq(cameraSessions.farmerId, farmerId)),
@@ -278,7 +288,7 @@ export async function updateCameraSession(
     .where(
       and(eq(cameraSessions.id, id), eq(cameraSessions.farmerId, farmerId)),
     )
-    .returning();
+    .returning(cameraSessionMetadataColumns);
 
   return rows.length > 0 ? toCameraSessionDTO(rows[0]) : null;
 }
@@ -289,7 +299,7 @@ export async function getCameraSessionByToken(
   token: string,
 ): Promise<{ session: CameraSessionDTO; farmerName: string } | null> {
   const rows = await db
-    .select({ session: cameraSessions, farmerName: farmers.name })
+    .select({ session: cameraSessionMetadataColumns, farmerName: farmers.name })
     .from(cameraSessions)
     .innerJoin(farmers, eq(farmers.id, cameraSessions.farmerId))
     .where(eq(cameraSessions.token, token))
@@ -346,7 +356,7 @@ function sanitiseDetection(input: IngestDetection): IngestDetection | null {
     trackId: input.trackId.slice(0, 80),
     objectClass: input.objectClass.slice(0, 60),
     confidence: clamp01(Number(input.confidence)),
-    box: [clamp01(x), clamp01(y), clamp01(w), clamp01(h)],
+    box: [clamp01(x), clamp01(y), Math.max(0, clamp01(x + w) - clamp01(x)), Math.max(0, clamp01(y + h) - clamp01(y))],
     moving: Boolean(input.moving),
     direction:
       typeof input.direction === "string"
@@ -357,7 +367,8 @@ function sanitiseDetection(input: IngestDetection): IngestDetection | null {
         ? Math.max(0, Math.min(1000, input.speed))
         : undefined,
     path: normalisePath(input.path),
-    confirmed: Boolean(input.confirmed),
+    confirmed: Boolean(input.confirmed) && !input.coasting,
+    coasting: Boolean(input.coasting),
     hits: Number.isFinite(hits) ? Math.max(0, Math.min(999, Math.round(hits))) : undefined,
   };
 }
@@ -421,29 +432,31 @@ export async function ingestCameraFrame(
   let verification: CameraIngestResult["verification"] = null;
 
   if (confirmedCandidates.length > 0) {
-    // Use the database clock for both windows: the app machine and Neon can
-    // differ by several seconds, which would otherwise break the cooldown.
+    // Query only the tracks in this frame. Retain refuted rows too, so a
+    // disagreement cannot turn one track into repeated new alarms.
     const seen = await db
-      .select({ trackId: cameraDetections.trackId })
+      .select({ detection: cameraDetections, alert: cameraAlerts })
       .from(cameraDetections)
+      .leftJoin(cameraAlerts, eq(cameraAlerts.detectionId, cameraDetections.id))
       .where(
         and(
           eq(cameraDetections.sessionId, session.id),
-          gte(
-            cameraDetections.createdAt,
-            sql`now() - interval '15 minutes'`,
-          ),
+          inArray(cameraDetections.trackId, confirmedCandidates.map((item) => item.trackId)),
+          // Run-unique track ids stay idempotent even after a long offline
+          // retry or an object remaining in view for more than 15 minutes.
         ),
       );
 
     const knownTracks = new Set(
       seen
-        .map((row) => row.trackId)
+        .map((row) => row.detection.trackId)
         .filter((value): value is string => Boolean(value)),
     );
-    const fresh = confirmedCandidates.filter(
-      (detection) => !knownTracks.has(detection.trackId),
-    );
+    const fresh = confirmedCandidates.filter((detection) => {
+      if (knownTracks.has(detection.trackId)) return false;
+      knownTracks.add(detection.trackId);
+      return true;
+    });
 
     if (fresh.length > 0) {
       inserted = await db
@@ -469,58 +482,41 @@ export async function ingestCameraFrame(
         )
         .returning();
 
-      // One alarm per new confirmed track, with a per-camera cooldown so a
-      // flock of birds cannot flood the dashboard. The comparison runs in the
-      // database so clock skew between the app and Neon cannot break it.
-      const recentAlert = await db
-        .select({ id: cameraAlerts.id })
-        .from(cameraAlerts)
-        .where(
-          and(
-            eq(cameraAlerts.sessionId, session.id),
-            gte(
-              cameraAlerts.createdAt,
-              sql`now() - interval '8 seconds'`,
-            ),
-          ),
-        )
-        .limit(1);
-
-      if (recentAlert.length === 0) {
-        alerts = await db
-          .insert(cameraAlerts)
-          .values(
-            inserted.slice(0, MAX_ALERTS_PER_FRAME).map((detection) => {
-              const category: TrackedCategory =
-                detection.category === "person" ? "person" : "animal";
-              return {
-                sessionId: detection.sessionId,
-                farmerId: detection.farmerId,
-                detectionId: detection.id,
-                label: detection.label,
-                emoji: detection.emoji,
-                category,
-                confidence: detection.confidence,
-                message: alarmMessage(
-                  detection.label,
-                  category,
-                  session.name,
-                ),
-                source: "on-device" as const,
-                verified: false,
-                lat,
-                lng,
-              };
-            }),
-          )
-          .returning();
-      }
-
       verification = {
         ids: inserted.map((detection) => detection.id),
         frame: payload.frame,
       };
     }
+
+    // No camera-wide cooldown or four-alert cap: both used to permanently
+    // swallow the next new person/animal after logging its track. Also repair
+    // an interrupted ingest that saved a detection but not its alarm.
+    const needsAlarm = [
+      ...inserted,
+      ...seen.filter((row) => row.alert === null).map((row) => row.detection),
+    ];
+    if (needsAlarm.length > 0) {
+      alerts = await db.insert(cameraAlerts).values(needsAlarm.map((detection) => {
+        const category: TrackedCategory = detection.category === "person" ? "person" : "animal";
+        return {
+          sessionId: detection.sessionId,
+          farmerId: detection.farmerId,
+          detectionId: detection.id,
+          label: detection.label,
+          emoji: detection.emoji,
+          category,
+          confidence: detection.confidence,
+          message: alarmMessage(detection.label, category, session.name),
+          source: detection.source,
+          verified: detection.verified,
+          lat: detection.lat,
+          lng: detection.lng,
+        };
+      })).returning();
+    }
+    // A timed-out client may retry a frame that was already saved. Return its
+    // existing unread receipts too, rather than losing the phone's popup.
+    alerts.push(...seen.flatMap((row) => row.alert && !row.alert.acknowledgedAt ? [row.alert] : []));
   }
 
   await db
@@ -537,20 +533,22 @@ export async function ingestCameraFrame(
         ? payload.deviceLabel.slice(0, 80)
         : session.deviceLabel,
       lastSeenAt: now,
-      frameUpdatedAt: now,
+      // Strictly increasing millisecond versions prevent two fast uploads
+      // from exposing different pixels under the same versioned frame URL.
+      frameUpdatedAt: sql`greatest(coalesce(${cameraSessions.frameUpdatedAt}, '-infinity'::timestamp) + interval '1 millisecond', ${now.toISOString()}::timestamp)`,
       startedAt: session.startedAt ?? now,
       endedAt: null,
       totalDetections:
         inserted.length > 0
           ? sql`${cameraSessions.totalDetections} + ${inserted.length}`
-          : session.totalDetections,
+          : sql`${cameraSessions.totalDetections}`,
       ...(lat !== null ? { lat } : {}),
       ...(lng !== null ? { lng } : {}),
     })
-    .where(eq(cameraSessions.id, session.id));
+    .where(and(eq(cameraSessions.id, session.id), ne(cameraSessions.status, "ended")));
 
   const refreshed = await db
-    .select()
+    .select(cameraSessionMetadataColumns)
     .from(cameraSessions)
     .where(eq(cameraSessions.id, session.id))
     .limit(1);
@@ -582,8 +580,8 @@ function pickAnimalSpecies(
 
 /**
  * Applies the Groq verdict to already-stored detections: refines species,
- * marks detections verified, and removes clear false positives (plus their
- * alarms). Failures are silent — the local tracker remains the source of truth.
+ * marks detections verified, and flags weak disagreements for human review.
+ * AI never acknowledges or deletes alarms. Failures leave local labels intact.
  */
 export async function verifyCameraDetections(
   db: Database,
@@ -597,7 +595,7 @@ export async function verifyCameraDetections(
     db
       .select()
       .from(cameraDetections)
-      .where(inArray(cameraDetections.id, detectionIds)),
+      .where(and(eq(cameraDetections.sessionId, sessionId), inArray(cameraDetections.id, detectionIds))),
     db
       .select({ name: cameraSessions.name })
       .from(cameraSessions)
@@ -636,8 +634,8 @@ export async function verifyCameraDetections(
       localMeta.category === "person" ? "person" : "animal";
     const trackId = row.trackId ?? "";
 
-    // Nothing at all in frame: only drop low-confidence local guesses. A
-    // confident local detection stays (Groq can miss distant animals).
+    // A second model can miss distant animals. Retain the event and alarm,
+    // and explicitly ask for human review of weak local guesses.
     if (verdict.verdict === "none") {
       if ((row.confidence ?? 0) < 0.6) {
         refutedIds.push(row.id);
@@ -703,10 +701,16 @@ export async function verifyCameraDetections(
   }
 
   if (refutedIds.length > 0) {
-    await db.delete(cameraAlerts).where(
-      inArray(cameraAlerts.detectionId, refutedIds),
-    );
-    await db.delete(cameraDetections).where(inArray(cameraDetections.id, refutedIds));
+    await db.update(cameraDetections).set({ source: "groq", verified: false })
+      .where(inArray(cameraDetections.id, refutedIds));
+    for (const row of rows.filter((item) => refutedIds.includes(item.id))) {
+      const category: TrackedCategory = row.category === "person" ? "person" : "animal";
+      await db.update(cameraAlerts).set({
+        source: "groq",
+        verified: false,
+        message: `${alarmMessage(row.label, category, sessionName)} — AI could not confirm; please review`,
+      }).where(eq(cameraAlerts.detectionId, row.id));
+    }
   }
 
   let verifiedCount = 0;
@@ -744,12 +748,12 @@ export async function verifyCameraDetections(
   // Keep the live overlay in sync with the refined labels.
   if (touchedTrackIds.size > 0) {
     const sessionRows = await db
-      .select()
+      .select(cameraSessionMetadataColumns)
       .from(cameraSessions)
       .where(eq(cameraSessions.id, sessionId))
       .limit(1);
     const session = sessionRows[0];
-    if (session) {
+    if (session?.frameUpdatedAt && session.status !== "ended") {
       const confirmedRows = await db
         .select()
         .from(cameraDetections)
@@ -793,7 +797,7 @@ export async function verifyCameraDetections(
       await db
         .update(cameraSessions)
         .set({ latestDetections: next })
-        .where(eq(cameraSessions.id, sessionId));
+        .where(and(eq(cameraSessions.id, sessionId), ne(cameraSessions.status, "ended"), eq(cameraSessions.frameUpdatedAt, session.frameUpdatedAt)));
     }
   }
 
@@ -816,26 +820,45 @@ function humanVerdictWins(verdict: GroqVerdict): boolean {
 export async function listCameraAlerts(
   db: Database,
   farmerId: number,
-  options: { limit?: number; includeAcknowledged?: boolean } = {},
-): Promise<CameraAlertDTO[]> {
-  const limit = Math.min(50, Math.max(1, options.limit ?? 8));
+  options: { limit?: number; includeAcknowledged?: boolean; beforeId?: number; afterId?: number; excludedIds?: number[] } = {},
+): Promise<CameraAlertPage> {
+  const limit = Math.min(50, Math.max(1, Math.round(options.limit ?? 20)));
+  const owner = eq(cameraAlerts.farmerId, farmerId);
+  const afterId = options.afterId ?? 0;
+  const excludedIds = options.excludedIds ?? [];
+  const scope = and(owner,
+    afterId > 0 ? gt(cameraAlerts.id, afterId) : undefined,
+    excludedIds.length > 0 ? notInArray(cameraAlerts.id, excludedIds) : undefined,
+  );
+  const unreadFilter = and(scope, isNull(cameraAlerts.acknowledgedAt));
+  // One statement gives rows, cursor and totals the SAME database snapshot.
+  // The left join preserves totals even when an older page is exhausted.
+  const totals = db.$with("alarm_totals").as(db
+    .select({
+      unread: sql<number>`count(*)::int`.as("unread"),
+      latestId: sql<number | null>`max(${cameraAlerts.id})`.as("latest_id"),
+    }).from(cameraAlerts).where(unreadFilter));
+  const rows = await db.with(totals)
+    .select({ alert: cameraAlerts, sessionName: cameraSessions.name, unread: totals.unread, latestId: totals.latestId })
+    .from(totals)
+    .leftJoin(cameraAlerts, and(
+      options.includeAcknowledged ? scope : unreadFilter,
+      options.beforeId !== undefined ? lt(cameraAlerts.id, options.beforeId) : undefined,
+    ))
+    .leftJoin(cameraSessions, eq(cameraSessions.id, cameraAlerts.sessionId))
+    .orderBy(desc(cameraAlerts.id))
+    .limit(limit + 1);
 
-  const rows = await db
-    .select({ alert: cameraAlerts, sessionName: cameraSessions.name })
-    .from(cameraAlerts)
-    .innerJoin(cameraSessions, eq(cameraSessions.id, cameraAlerts.sessionId))
-    .where(
-      options.includeAcknowledged
-        ? eq(cameraAlerts.farmerId, farmerId)
-        : and(
-            eq(cameraAlerts.farmerId, farmerId),
-            isNull(cameraAlerts.acknowledgedAt),
-          ),
-    )
-    .orderBy(desc(cameraAlerts.createdAt))
-    .limit(limit);
-
-  return rows.map((row) => toAlertDTO(row.alert, row.sessionName));
+  const available = rows.flatMap((row) => row.alert ? [{ alert: row.alert, sessionName: row.sessionName ?? "field camera" }] : []);
+  const page = available.slice(0, limit);
+  return {
+    alerts: page.map((row) => toAlertDTO(row.alert, row.sessionName)),
+    unread: rows[0]?.unread ?? 0,
+    latestId: rows[0]?.latestId ?? null,
+    nextCursor: available.length > limit ? page[page.length - 1].alert.id : null,
+    afterId,
+    excludedIds,
+  };
 }
 
 export async function acknowledgeCameraAlert(
@@ -857,6 +880,7 @@ export async function acknowledgeCameraAlert(
 export async function acknowledgeAllCameraAlerts(
   db: Database,
   farmerId: number,
+  throughId: number,
 ): Promise<number> {
   const rows = await db
     .update(cameraAlerts)
@@ -865,6 +889,7 @@ export async function acknowledgeAllCameraAlerts(
       and(
         eq(cameraAlerts.farmerId, farmerId),
         isNull(cameraAlerts.acknowledgedAt),
+        lte(cameraAlerts.id, throughId),
       ),
     )
     .returning({ id: cameraAlerts.id });

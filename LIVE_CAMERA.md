@@ -107,16 +107,17 @@ Phone /camera
                           │
              camera_sessions (latest frame + overlay state)
              camera_detections (one row per NEW CONFIRMED human/animal)
-             camera_alerts     (one alarm per track, 8 s per-camera cooldown)
+             camera_alerts     (one alarm per track — no cooldown, no suppression)
                           │
                           ├─ after(): optional Groq vision check of the frame
-                          │    → relabel species / mark verified / retract
+                          │    → relabel species / mark verified / flag for review
                           ▼
 Laptop /watch + dashboard
-  polls the session every ~900 ms and /api/camera/alerts every 4–6 s
+  /watch polls the session every ~900 ms; the alarm manager polls
+  /api/camera/alerts every ~3 s (8 s while the tab is hidden)
   <img> = latest frame (versioned, cached)
   boxes/trails drawn as an overlay from latestDetections
-  banner + optional siren/notification for new alarms
+  one persistent popup per unread alarm + continuous siren until stopped
 ```
 
 ### Why it feels live
@@ -158,14 +159,30 @@ custom model returns them.
 
 - A track must be seen **3 times at ≥ 0.42** confidence (or 2 times at ≥ 0.82)
   before it is logged — a single blurry frame cannot create an event.
-- Each confirmed track writes one `camera_detections` row; an alarm row is added
-  when the camera has not alarmed in the last **8 seconds**, so a flock of birds
-  cannot flood the dashboard.
+- Each confirmed track writes one `camera_detections` row **and** one
+  `camera_alerts` row. There is no server-side cooldown or suppression: a second
+  person, or the same person after leaving and returning, always raises a new
+  alarm.
 - Duplicate tracks are ignored for 15 minutes per session. Track ids carry a
   per-run suffix (`p1-abc12`), so reloading the phone does not get swallowed.
-- `/watch` and the dashboard poll `/api/camera/alerts`, show the newest event in a
-  banner, and can **arm** a Web Audio siren + browser notification. Arming is
-  remembered per browser; alarms that existed before the page opened do not ring.
+- Alarms are **persistent**: the dashboard mounts one alarm manager in the
+  layout, so moving between dashboard pages does not stop it. Every unread alarm
+  stays on screen as a popup and the siren keeps ringing until a human stops it.
+  A lost connection, an ended camera session, an AI disagreement or an expired
+  login **never** silences an alarm that is already ringing.
+- **Stop siren** silences audio immediately, closes the popups and acknowledges
+  the snapshot you saw (`throughId`); a genuinely newer alarm that arrived in the
+  same instant still rings. Dismissing one popup acknowledges only that alarm.
+  Dismissals are retried while offline and the stopped alarms stay muted on the
+  device even if the network never confirms them.
+- The siren is a continuous, loud two-carrier wail. **Mute siren / Enable siren**
+  and a 20–100 % **volume** slider are remembered per account and browser; the
+  **Test continuous siren** button proves the sound without creating an alert.
+  Browsers require one tap before audio can start, so a "Sound is blocked" button
+  appears until audio is unlocked.
+- In-app popups need **no** browser notification permission. Granting
+  notifications only adds a native OS popup per new alarm; it is a convenience,
+  never a requirement, and muting the siren does not disable it.
 
 ### Optional AI verification (Groq)
 
@@ -181,8 +198,11 @@ GROQ_TIMEOUT_MS=4500
 
 - One downscaled JPEG per confirmed track is sent (never a video stream).
 - The call runs in Next.js `after()`, so ingest returns immediately.
-- The verdict can refine the species (e.g. `cow` → `wild boar`), mark the row
-  **AI verified**, or refute it and retract the alarm.
+- The verdict can refine the species (e.g. `cow` → `wild boar`) and mark the row
+  **AI verified**. A refuted detection is **not** deleted: its alarm is kept for
+  human review with an "AI could not confirm" message, and it is never
+  auto-acknowledged. A high-confidence on-device person that Groq disagrees with
+  stays as on-device evidence for you to judge.
 - Missing key, HTTP error or timeout → silently skipped; on-device labels stand.
 
 ---
@@ -201,10 +221,10 @@ GROQ_TIMEOUT_MS=4500
 5. **Walk through frame** — the laptop shows a **Person** box, a movement trail,
    confidence and direction. After ~1 second the track is confirmed and a
    notification popup slides in with a continuous high-pitched siren.
-6. **Sound the alarm** — the siren loops until every alarm is dismissed, or tap
-   **Siren on** in the popup controls to mute it (this also arms audio +
-   notifications). Walk in again after the cooldown to hear it. Point out that
-   vehicles and random motion are ignored.
+6. **Sound the alarm** — the siren loops until a human taps **Stop siren**, or
+   tap **Mute siren** in the alarm settings to silence it. Walk in again later
+   — there is no cooldown, so a new track rings again. Point out that vehicles
+   and random motion are ignored.
 7. **Show the field context** — the phone GPS links the camera to the nearest
    mapped field (distance + compass direction) and live weather at the camera.
 8. **Close the loop** — satellites mapped the land; the camera sees who and what
@@ -233,8 +253,9 @@ Tips:
 | AI badge stuck on “Loading AI…” | First load downloads ~6 MB of model weights. Detection starts as soon as it finishes; check the network or let it finish. |
 | Detection feed misses people | Tracks need 3 hits (or 2 at high confidence) — one fast pass through the frame is not enough. |
 | A car/bike drives past and nothing happens | By design: only humans and animals are tracked. |
-| No alarm banner | Alarms appear only for confirmed tracks, at most once every 8 s per camera. Check `/api/camera/alerts` (`unread`) and that the page is signed in. |
-| Siren is silent | Tap **Siren on** once (browsers require a user gesture); browser notifications also need permission. |
+| No alarm banner | Alarms appear only for confirmed tracks. Check `/api/camera/alerts` (`unread`) and that the page is signed in. Alarms persist until you press **Stop siren**. |
+| Siren is silent | Tap anywhere once, or press **Sound is blocked — tap to start the loud siren** (browsers require a user gesture); check the **Siren volume** slider, the phone/OS volume and that the tab is not muted. Browser notifications also need permission, but in-app popups do not. |
+| Alarm says “Needs human review” | The AI could not confirm the detection. The alarm is kept so you can judge it yourself; it is never acknowledged automatically. |
 | Alarm says “AI verified” but species looks generic | That means Groq agreed with the on-device label. If `GROQ_API_KEY` is unset there is no badge and labels stay on-device. |
 | Boxes offset from the video | The stored frame aspect ratio is used for the player; refresh the page. On a real phone the frame is 16:9/4:3 and aligns automatically. |
 | Phone GPS not shared | Allow location for the site; some browsers require HTTPS (use the tunnel). |
