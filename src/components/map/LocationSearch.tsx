@@ -2,7 +2,6 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import type {
-  FormEvent,
   KeyboardEvent as ReactKeyboardEvent,
   RefObject,
 } from "react";
@@ -17,6 +16,7 @@ import {
   placeKindLabel,
   type GeocodePlace,
 } from "@/lib/geocode";
+import { useI18n } from "@/lib/i18n";
 
 const MIN_QUERY_LENGTH = 2;
 const SEARCH_DEBOUNCE_MS = 450;
@@ -38,6 +38,7 @@ export function LocationSearch({
   className,
 }: LocationSearchProps) {
   const baseId = useId();
+  const { t } = useI18n();
   const listId = `${baseId}-list`;
   const optionId = (index: number) => `${baseId}-option-${index}`;
 
@@ -190,27 +191,7 @@ export function LocationSearch({
     }
   };
 
-  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "ArrowDown") {
-      event.preventDefault();
-      if (results.length === 0) return;
-      setOpen(true);
-      setActiveIndex((current) => (open ? (current + 1) % results.length : 0));
-    } else if (event.key === "ArrowUp") {
-      event.preventDefault();
-      if (results.length === 0) return;
-      setOpen(true);
-      setActiveIndex((current) =>
-        open ? (current - 1 + results.length) % results.length : results.length - 1,
-      );
-    } else if (event.key === "Escape") {
-      setOpen(false);
-    }
-  };
-
-  const handleSubmit = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const submitSearch = () => {
     if (searchedFor === trimmed) {
       const place = results[activeIndex] ?? results[0];
       if (place) selectPlace(place);
@@ -225,14 +206,34 @@ export function LocationSearch({
     }
   };
 
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      if (results.length === 0) return;
+      setOpen(true);
+      setActiveIndex((current) => (open ? (current + 1) % results.length : 0));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (results.length === 0) return;
+      setOpen(true);
+      setActiveIndex((current) =>
+        open ? (current - 1 + results.length) % results.length : results.length - 1,
+      );
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      submitSearch();
+    } else if (event.key === "Escape") {
+      setOpen(false);
+    }
+  };
+
   const showEmpty =
     !loading && !error && results.length === 0 && searchedFor === trimmed;
 
   return (
     <div ref={containerRef} className={cn("relative w-full", className)}>
-      <form
+      <div
         role="search"
-        onSubmit={handleSubmit}
         className="map-panel flex min-h-11 items-center gap-2 rounded-full px-3 py-1.5"
       >
         <Search aria-hidden className="h-4 w-4 shrink-0 text-ink-soft" />
@@ -260,8 +261,8 @@ export function LocationSearch({
           aria-activedescendant={
             open && results.length > 0 ? optionId(activeIndex) : undefined
           }
-          aria-label="Search for a village, town or coordinates"
-          placeholder="Search village, town or lat, lng"
+          aria-label={t("Search for a village, town or coordinates")}
+          placeholder={t("Search village, town or lat, lng")}
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
@@ -273,26 +274,26 @@ export function LocationSearch({
           <button
             type="button"
             onClick={clear}
-            aria-label="Clear location search"
+            aria-label={t("Clear location search")}
             className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-ink-soft transition-colors hover:bg-[var(--card-muted)]"
           >
             <X className="h-3.5 w-3.5" />
           </button>
         ) : null}
-      </form>
+      </div>
 
       {open ? (
         <div className="map-panel absolute inset-x-0 top-[calc(100%+0.45rem)] z-[600] overflow-hidden rounded-2xl p-1.5">
           {error ? (
             <p role="alert" className="px-3 py-3 text-xs leading-relaxed text-danger-700">
-              {error}
+              {t(error)}
             </p>
           ) : results.length > 0 ? (
             <>
               <ul
                 id={listId}
                 role="listbox"
-                aria-label="Location search results"
+                aria-label={t("Location search results")}
                 className="max-h-[min(50dvh,20rem)] overflow-y-auto"
               >
                 {results.map((place, index) => {
@@ -321,7 +322,7 @@ export function LocationSearch({
                         </span>
                         <span className="muted mt-0.5 block truncate text-[0.7rem] leading-snug">
                           <span className="font-semibold uppercase tracking-[0.08em] text-leaf-700">
-                            {placeKindLabel(place.kind)}
+                            {t(placeKindLabel(place.kind))}
                           </span>
                           {place.detail ? ` · ${place.detail}` : ""}
                         </span>
@@ -331,20 +332,20 @@ export function LocationSearch({
                 })}
               </ul>
               <p className="muted border-t border-[var(--color-line)] px-3 pb-1 pt-2 text-[0.62rem] leading-relaxed">
-                Search by Photon · © OpenStreetMap contributors
+                {t("Search by Photon · © OpenStreetMap contributors")}
               </p>
             </>
           ) : showEmpty ? (
             <div className="px-3 py-3">
-              <p className="text-sm font-semibold">No places found</p>
+              <p className="text-sm font-semibold">{t("No places found")}</p>
               <p className="muted mt-0.5 text-xs leading-relaxed">
-                Try a village name, a nearby town, or a lat, lng pair.
+                {t("Try a village name, a nearby town, or a lat, lng pair.")}
               </p>
             </div>
           ) : (
             <p className="muted flex items-center gap-2 px-3 py-3 text-xs">
               <Spinner className="h-3.5 w-3.5" />
-              Searching…
+              {t("Searching…")}
             </p>
           )}
         </div>

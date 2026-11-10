@@ -24,6 +24,7 @@ import type { CameraSessionDTO } from "@/lib/camera";
 import { formatLandArea } from "@/lib/format";
 import type { GeocodePlace } from "@/lib/geocode";
 import { polygonAreaAcres, polygonCentroid } from "@/lib/geo";
+import { useI18n } from "@/lib/i18n";
 import {
   DEFAULT_CENTER,
   DEFAULT_ZOOM,
@@ -52,6 +53,7 @@ export function MapDrawer({
   onSaved?: (farm: FarmDTO) => void;
 }) {
   const mapRef = useRef<LeafletMap | null>(null);
+  const { t } = useI18n();
   const [points, setPoints] = useState<GeoPoint[]>([]);
   const [name, setName] = useState("");
   const [searchTarget, setSearchTarget] = useState<GeocodePlace | null>(null);
@@ -115,7 +117,7 @@ export function MapDrawer({
 
     try {
       const { farm } = await api.createFarm({
-        name: name.trim() || "My Farm",
+        name: name.trim() || t("My Farm"),
         points,
       });
       setPoints([]);
@@ -189,7 +191,7 @@ export function MapDrawer({
               }}
             >
               <Tooltip>
-                {camera.name} · {camera.isLive ? "LIVE" : camera.status}
+                {camera.name} · {camera.isLive ? t("LIVE") : camera.status === "live" ? t("Live") : t("Ended")}
               </Tooltip>
             </CircleMarker>
           ))}
@@ -260,7 +262,7 @@ export function MapDrawer({
             }}
           >
             <Tooltip direction="top" offset={[0, -6]}>
-              Centre · {area.toFixed(2)} acres
+              {t("Centre · {area} acres", { area: area.toFixed(2) })}
             </Tooltip>
           </CircleMarker>
         ) : null}
@@ -271,13 +273,18 @@ export function MapDrawer({
 
         <label className="block">
           <span className="text-sm font-medium">
-            Farm name
+            {t("Farm name")}
           </span>
           <input
             className="input mt-2"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="e.g. North Paddy Field"
+            onKeyDown={(event) => {
+              // The drawer can sit inside the onboarding wizard's form.
+              // Enter should not submit it while the farmer is naming a field.
+              if (event.key === "Enter") event.preventDefault();
+            }}
+            placeholder={t("e.g. North Paddy Field")}
             maxLength={80}
           />
         </label>
@@ -288,7 +295,7 @@ export function MapDrawer({
             onClick={handleLocate}
           >
             <Crosshair aria-hidden className="h-4 w-4" />
-            Locate me
+            {t("Locate me")}
           </Button>
           <Button
             variant="secondary"
@@ -296,7 +303,7 @@ export function MapDrawer({
             disabled={points.length === 0}
           >
             <Undo2 aria-hidden className="h-4 w-4" />
-            Undo
+            {t("Undo")}
           </Button>
           <Button
             variant="secondary"
@@ -307,7 +314,7 @@ export function MapDrawer({
             disabled={points.length === 0}
           >
             <Trash2 aria-hidden className="h-4 w-4" />
-            Clear
+            {t("Clear")}
           </Button>
           <Button
             onClick={() => void handleSave()}
@@ -315,24 +322,28 @@ export function MapDrawer({
             loading={saving}
           >
             <Save aria-hidden className="h-4 w-4" />
-            Save farm
+            {t("Save farm")}
           </Button>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2 text-xs leading-relaxed">
           <span className="chip chip-brand">
             <Ruler className="h-3 w-3" />
-            {formatLandArea(area)}
+            {t(formatLandArea(area))}
           </span>
           <span className="muted">
-            {points.length} corner{points.length === 1 ? "" : "s"} · tap the map
-            to trace the boundary
+            {t(
+              points.length === 1
+                ? "{count} corner · tap the map to trace the boundary"
+                : "{count} corners · tap the map to trace the boundary",
+              { count: points.length },
+            )}
           </span>
         </div>
 
         {error ? (
           <div className="mt-2.5">
-            <Callout tone="danger">{error}</Callout>
+            <Callout tone="danger">{t(error)}</Callout>
           </div>
         ) : null}
       </div>
@@ -340,8 +351,13 @@ export function MapDrawer({
       <div className="pointer-events-none absolute bottom-6 left-3 right-16 z-[500] flex justify-center sm:left-4 sm:right-20">
         <span className="map-chip map-hint">
           {farms.length > 0
-            ? `${farms.length} saved field${farms.length === 1 ? "" : "s"} mapped on this account`
-            : "Trace at least 3 corners, name the field, save"}
+            ? t(
+                farms.length === 1
+                  ? "{count} saved field mapped on this account"
+                  : "{count} saved fields mapped on this account",
+                { count: farms.length },
+              )
+            : t("Trace at least 3 corners, name the field, save")}
         </span>
       </div>
     </div>

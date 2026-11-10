@@ -11,6 +11,7 @@ import { api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
 import { formatLandArea } from "@/lib/format";
 import { useFarms } from "@/lib/hooks/use-farms";
+import { useI18n } from "@/lib/i18n";
 
 const MapDrawer = dynamic(
   () => import("@/components/map/MapDrawer").then((mod) => mod.MapDrawer),
@@ -23,6 +24,7 @@ const MapDrawer = dynamic(
 );
 
 export function MapView() {
+  const { t } = useI18n();
   const { farms, needsSetup, refresh } = useFarms();
   const [cameras, setCameras] = useState<CameraSessionDTO[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
@@ -58,11 +60,16 @@ export function MapView() {
             </span>
             <div className="min-w-0">
               <h1 className="text-xl font-semibold leading-tight">
-                Field &amp; land map
+                {t("Field & land map")}
               </h1>
               <p className="muted mt-1.5 flex items-center gap-3 text-xs tabular-nums">
                 <span>
-                  {liveCameras.length} camera{liveCameras.length === 1 ? "" : "s"} live
+                  {t(
+                    liveCameras.length === 1
+                      ? "{count} camera live"
+                      : "{count} cameras live",
+                    { count: liveCameras.length },
+                  )}
                 </span>
               </p>
             </div>
@@ -72,7 +79,7 @@ export function MapView() {
 
       {notice ? (
         <Callout tone="success" icon={<Satellite aria-hidden className="h-4 w-4" />} className="mt-4">
-          {notice}
+          {t(notice)}
         </Callout>
       ) : null}
 

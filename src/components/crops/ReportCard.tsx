@@ -1,9 +1,12 @@
+"use client";
+
 import { ExternalLink, ShoppingBasket, Sparkles } from "lucide-react";
 
 import { Callout } from "@/components/ui/Callout";
 import { MarkdownLite } from "@/components/ui/MarkdownLite";
 import { cn } from "@/lib/cn";
 import { formatRelative } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
 import type { PestRiskLevel } from "@/lib/pest-risk";
 import {
@@ -24,6 +27,7 @@ export function ReportCard({
   /** Drops the outer card chrome when the report sits inside another panel. */
   embedded?: boolean;
 }) {
+  const { t } = useI18n();
   const cropName = report.cropName ?? crop?.cropName ?? null;
   const shopping = getWeeklyShoppingList({
     cropName: cropName ?? "your crop",
@@ -51,19 +55,21 @@ export function ReportCard({
           <div className="min-w-0">
             <h3 className="text-base font-semibold leading-snug">
               {cropName
-                ? `${cropName} — weekly action plan`
-                : "Weekly action plan"}
+                ? t("{crop} — weekly action plan", { crop: t(cropName) })
+                : t("Weekly action plan")}
             </h3>
             <p className="muted mt-1 text-xs">
-              Generated {formatRelative(report.createdAt)}
+              {t("Generated {time}", { time: t(formatRelative(report.createdAt)) })}
             </p>
           </div>
         </div>
 
         {report.source === "gemini" ? (
-          <span className="chip chip-violet max-w-full whitespace-normal break-words">Gemini · {report.model}</span>
+          <span className="chip chip-violet max-w-full whitespace-normal break-words">
+            {t("Gemini · {model}", { model: report.model ?? "" })}
+          </span>
         ) : report.source === "fallback" ? (
-          <span className="chip chip-warn">Rule-based fallback</span>
+          <span className="chip chip-warn">{t("Rule-based fallback")}</span>
         ) : null}
       </header>
 
@@ -72,18 +78,17 @@ export function ReportCard({
       <MarkdownLite text={report.aiActionPlan} />
 
       {shopping.length > 0 ? (
-        <section aria-label="Suggested inputs and equipment" className="space-y-3">
+        <section aria-label={t("Suggested inputs and equipment")} className="space-y-3">
           <header className="flex flex-wrap items-end justify-between gap-2">
             <div>
               <h4 className="flex items-center gap-2 text-sm font-semibold">
                 <ShoppingBasket aria-hidden className="h-4 w-4 text-leaf-600" />
                 {showInputs
-                  ? "Suggested for this plan"
-                  : "Equipment for the next step"}
+                  ? t("Suggested for this plan")
+                  : t("Equipment for the next step")}
               </h4>
               <p className="muted mt-1 text-xs">
-                Our advisory for each item. Price, seller and delivery are shown
-                on Amazon.in.
+                {t("Our advisory for each item. Price, seller and delivery are shown on Amazon.in.")}
               </p>
             </div>
             <span className="chip chip-brand">Amazon.in</span>
@@ -112,16 +117,16 @@ export function ReportCard({
                         meta.tone,
                       )}
                     >
-                      {meta.label}
+                      {t(meta.label)}
                     </span>
                   </div>
 
                   <div className="flex flex-1 flex-col gap-1.5 p-2.5">
                     <h5 className="line-clamp-2 text-[0.8125rem] font-semibold leading-snug">
-                      {item.title}
+                      {t(item.title)}
                     </h5>
                     <p className="muted line-clamp-3 text-[0.7rem] leading-snug">
-                      {item.detail}
+                      {t(item.detail)}
                     </p>
                     <a
                       href={item.url}
@@ -129,11 +134,13 @@ export function ReportCard({
                       rel="noopener noreferrer sponsored"
                       className="btn mt-auto min-h-9 w-full gap-1.5 border-[#f0c14b] bg-[#ffd814] px-2 text-[0.75rem] text-[#111] hover:bg-[#f7ca00]"
                     >
-                      Buy now
+                      {t("Buy now")}
                       <ExternalLink aria-hidden className="h-3 w-3" />
                       <span className="sr-only">
                         {" "}
-                        for {item.title} on Amazon.in (opens in a new tab)
+                        {t("for {title} on Amazon.in (opens in a new tab)", {
+                          title: t(item.title),
+                        })}
                       </span>
                     </a>
                   </div>
@@ -143,9 +150,7 @@ export function ReportCard({
           </div>
 
           <p className="muted text-[0.6875rem] leading-relaxed">
-            Buy now opens the Amazon.in product page. Price, seller and
-            availability come from Amazon. Confirm the label, approved dose and
-            safety interval before spraying.
+            {t("Buy now opens the Amazon.in product page. Price, seller and availability come from Amazon. Confirm the label, approved dose and safety interval before spraying.")}
           </p>
         </section>
       ) : null}

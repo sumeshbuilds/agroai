@@ -50,6 +50,7 @@ import {
   type TrackedCategory,
 } from "@/lib/camera";
 import { useClientValue } from "@/lib/hooks/use-client-value";
+import { useI18n } from "@/lib/i18n";
 
 type AiState = "idle" | "loading" | "ready" | "unavailable";
 type UploadState = "idle" | "ok" | "error" | "stopped";
@@ -192,6 +193,7 @@ function suppressDuplicates<
 }
 
 export function CameraStreamView() {
+  const { t } = useI18n();
   const token = useClientValue(
     () => new URLSearchParams(window.location.search).get("token") ?? "",
     "",
@@ -1146,35 +1148,35 @@ export function CameraStreamView() {
   const aiBadge = useMemo(() => {
     if (aiState === "ready") {
       return {
-        label: verifiedCount > 0 ? "AI verified" : "AI ready",
+        label: verifiedCount > 0 ? t("AI verified") : t("AI ready"),
         tone: "bg-leaf-300/15 text-leaf-300 border-leaf-300/30",
       };
     }
     if (aiState === "loading") {
       return {
-        label: "Loading AI…",
+        label: t("AI loading"),
         tone: "bg-sky-400/15 text-sky-300 border-sky-400/30",
       };
     }
     if (aiState === "unavailable") {
       return {
-        label: "Motion assist",
+        label: t("Motion assist"),
         tone: "bg-amber-400/15 text-amber-300 border-amber-400/30",
       };
     }
     return {
-      label: "AI idle",
+      label: t("AI idle"),
       tone: "bg-white/5 text-slate-300 border-white/10",
     };
-  }, [aiState, verifiedCount]);
+  }, [aiState, verifiedCount, t]);
 
   const qualityLabel = network.slow
     ? network.saveData
-      ? "Data saver"
-      : "2G"
+      ? t("Data saver")
+      : t("2G")
     : network.effectiveType
       ? network.effectiveType.toUpperCase()
-      : "Auto";
+      : t("Auto");
 
   return (
     <main className="camera-surface min-h-dvh bg-slate-950 text-slate-100">
@@ -1186,10 +1188,10 @@ export function CameraStreamView() {
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-base font-semibold">
-                {pairing?.session.name ?? "AgroAI field camera"}
+                {pairing?.session.name ?? t("AgroAI field camera")}
               </h1>
               <p className="mt-0.5 truncate text-xs text-slate-400">
-                {pairing?.farmerName ?? "Pairing phone camera…"}
+                {pairing?.farmerName ?? t("Pairing phone camera…")}
               </p>
             </div>
           </div>
@@ -1208,7 +1210,7 @@ export function CameraStreamView() {
                   : "h-1.5 w-1.5 rounded-full bg-slate-500"
               }
             />
-            {started ? "LIVE" : "OFFLINE"}
+            {started ? t("LIVE") : t("OFFLINE")}
           </span>
         </div>
       </header>
@@ -1218,11 +1220,11 @@ export function CameraStreamView() {
           <div className="rounded-2xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
             <p className="flex items-center gap-2 font-bold">
               <TriangleAlert className="h-4 w-4" />
-              Camera link problem
+              {t("Camera link problem")}
             </p>
-            <p className="mt-1 text-red-200/80">{linkError}</p>
+            <p className="mt-1 text-red-200/80">{t(linkError)}</p>
             <Link href="/watch" className="mt-3 inline-flex text-xs font-bold text-red-100 underline">
-              Open Live Watch to get a new link
+              {t("Open Live Watch to get a new link")}
             </Link>
           </div>
         ) : null}
@@ -1231,11 +1233,12 @@ export function CameraStreamView() {
           <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-4 text-sm text-amber-100">
             <p className="flex items-center gap-2 font-bold">
               <CameraOff className="h-4 w-4" />
-              Stream stopped from the laptop
+              {t("Stream stopped from the laptop")}
             </p>
             <p className="mt-1 text-amber-100/80">
-              Open Live Watch, select this camera and tap “Restart stream”, then
-              reload this page to pair again.
+              {t(
+                "Open Live Watch, select this camera and tap “Restart stream”, then reload this page to pair again.",
+              )}
             </p>
           </div>
         ) : null}
@@ -1244,30 +1247,34 @@ export function CameraStreamView() {
           <div className="rounded-2xl border border-sky-400/30 bg-sky-400/10 p-4 text-sm text-sky-100">
             <p className="flex items-center gap-2 font-bold">
               <ShieldCheck className="h-4 w-4" />
-              Camera needs a secure connection
+              {t("Camera needs a secure connection")}
             </p>
             <p className="mt-1 text-sky-100/80">
-              Phone browsers only expose the camera on <strong>https://</strong>{" "}
-              or <strong>localhost</strong>. This page is on{" "}
-              <code className="rounded bg-black/30 px-1 py-0.5 font-mono text-[11px]">
-                {host || "http://…"}
-              </code>
-              .
+              {t(
+                "Phone browsers only expose the camera on HTTPS or localhost. This page is on {host}.",
+                { host: host || "http://…" },
+              )}
             </p>
             <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-xs leading-relaxed text-sky-100/90">
               <li>
-                Easiest: open the deployed <strong>https://</strong> URL, or use a
-                Cloudflare/ngrok HTTPS tunnel.
+                {t(
+                  "Easiest: open the deployed HTTPS URL, or use a Cloudflare/ngrok HTTPS tunnel.",
+                )}
               </li>
               <li>
-                Android Chrome demo workaround: open{" "}
-                <code className="font-mono">chrome://flags/#unsafely-treat-insecure-origin-as-secure</code>,
-                add <code className="font-mono">http://{host}</code>, enable it and
-                relaunch Chrome.
+                {t(
+                  "Android Chrome demo workaround: open {flag}, add {origin}, enable it and relaunch Chrome.",
+                  {
+                    flag: "chrome://flags/#unsafely-treat-insecure-origin-as-secure",
+                    origin: `http://${host}`,
+                  },
+                )}
               </li>
               <li>
-                Or run <code className="font-mono">npm run dev:https</code> and
-                accept the certificate on the phone.
+                {t(
+                  "Or run {command} and accept the certificate on the phone.",
+                  { command: "npm run dev:https" },
+                )}
               </li>
             </ol>
           </div>
@@ -1281,13 +1288,15 @@ export function CameraStreamView() {
             <div className="min-w-0 flex-1">
               <p className="flex items-center gap-1.5 font-bold">
                 <BellRing className="h-4 w-4" />
-                Alarm sent to dashboard
+                {t("Alarm sent to dashboard")}
               </p>
               <p className="text-xs text-red-100/80">
-                {phoneAlert.message}
                 {phoneAlert.confidence
-                  ? ` · ${Math.round(phoneAlert.confidence * 100)}% confidence`
-                  : ""}
+                  ? t("{message} · {confidence}% confidence", {
+                      message: t(phoneAlert.message),
+                      confidence: Math.round(phoneAlert.confidence * 100),
+                    })
+                  : t(phoneAlert.message)}
               </p>
             </div>
           </div>
@@ -1306,7 +1315,7 @@ export function CameraStreamView() {
             autoPlay
             muted
             playsInline
-            aria-label="Live preview from this phone camera"
+            aria-label={t("Live preview from this phone camera")}
           />
           <canvas
             ref={overlayRef}
@@ -1318,7 +1327,7 @@ export function CameraStreamView() {
               <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap items-center gap-1.5">
                 <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/90 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-white">
                   <span className="h-1.5 w-1.5 animate-pulse-soft rounded-full bg-white" />
-                  Live
+                  {t("Live")}
                 </span>
                 <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold backdrop-blur ${aiBadge.tone}`}>
                   <Sparkles className="h-3 w-3" />
@@ -1326,7 +1335,7 @@ export function CameraStreamView() {
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/50 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">
                   <Activity className="h-3 w-3" />
-                  Motion {motionPct.toFixed(1)}%
+                  {t("Motion {value}%", { value: motionPct.toFixed(1) })}
                 </span>
               </div>
 
@@ -1338,7 +1347,7 @@ export function CameraStreamView() {
                       className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-[11px] font-bold text-white backdrop-blur"
                     >
                       <span aria-hidden>{detection.emoji}</span>
-                      {detection.label}
+                      {t(detection.label)}
                       <span className="text-white/60">
                         {Math.round(detection.confidence * 100)}%
                       </span>
@@ -1350,14 +1359,17 @@ export function CameraStreamView() {
                   {detections.length === 0 ? (
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[11px] font-semibold text-white/70 backdrop-blur">
                       <Crosshair className="h-3 w-3" />
-                      Watching for people &amp; animals…
+                      {t("Watching for people & animals…")}
                     </span>
                   ) : null}
                 </div>
 
                 <span className="inline-flex items-center gap-1 rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white/80 backdrop-blur">
                   <Wifi className="h-3 w-3" />
-                  {uploads} frames · {qualityLabel}
+                  {t("{frames} frames · {quality}", {
+                    frames: uploads,
+                    quality: qualityLabel,
+                  })}
                 </span>
               </div>
             </>
@@ -1367,10 +1379,11 @@ export function CameraStreamView() {
                 <Camera className="h-7 w-7" />
               </span>
               <div>
-                <h2 className="text-xl font-semibold">Point at your field</h2>
+                <h2 className="text-xl font-semibold">{t("Point at your field")}</h2>
                 <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-slate-300">
-                  Only people and animals are tracked. Confirmed tracks raise an
-                  alarm on the dashboard in about a second.
+                  {t(
+                    "Only people and animals are tracked. Confirmed tracks raise an alarm on the dashboard in about a second.",
+                  )}
                 </p>
               </div>
               <Button
@@ -1380,10 +1393,10 @@ export function CameraStreamView() {
                 className="min-h-12 px-5 text-sm"
               >
                 <Camera aria-hidden className="h-4 w-4" />
-                {starting ? "Opening camera…" : "Start camera stream"}
+                {starting ? t("Opening camera…") : t("Start camera stream")}
               </Button>
               {pairingBusy ? (
-                <p className="text-[11px] text-slate-400">Checking camera link…</p>
+                <p className="text-[11px] text-slate-400">{t("Checking camera link…")}</p>
               ) : null}
             </div>
           )}
@@ -1393,25 +1406,26 @@ export function CameraStreamView() {
           <div role="alert" className="rounded-xl border border-red-400/30 bg-red-500/10 p-4 text-sm text-red-200">
             <p className="flex items-center gap-2 font-semibold">
               <TriangleAlert aria-hidden className="h-4 w-4 shrink-0" />
-              Could not start the camera
+              {t("Could not start the camera")}
             </p>
-            <p className="mt-2 leading-relaxed">{cameraError}</p>
+            <p className="mt-2 leading-relaxed">{t(cameraError)}</p>
             <p className="mt-2 text-xs leading-relaxed">
-              Check camera access in your browser settings, then try starting
-              the stream again.
+              {t(
+                "Check camera access in your browser settings, then try starting the stream again.",
+              )}
             </p>
           </div>
         ) : null}
 
         {uploadError ? (
           <div className="rounded-2xl border border-amber-400/30 bg-amber-400/10 p-3.5 text-sm text-amber-100">
-            Upload: {uploadError}
+            {t("Upload: {error}", { error: t(uploadError) })}
           </div>
         ) : null}
 
         {aiError ? (
           <div className="rounded-2xl border border-amber-400/25 bg-amber-400/10 p-3.5 text-sm text-amber-100">
-            {aiError}
+            {t(aiError)}
           </div>
         ) : null}
 
@@ -1420,7 +1434,7 @@ export function CameraStreamView() {
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Stat
                 icon={<Radio className="h-3.5 w-3.5" />}
-                label="Stream"
+                label={t("Stream")}
                 value={formatElapsed(elapsed)}
               />
               <Stat
@@ -1431,25 +1445,25 @@ export function CameraStreamView() {
                     <Wifi className="h-3.5 w-3.5" />
                   )
                 }
-                label="Upload"
+                label={t("Upload")}
                 value={
                   uploadState === "error"
-                    ? "Retrying"
+                    ? t("Retrying")
                     : uploadState === "ok"
-                      ? "Receiving"
-                      : "Starting"
+                      ? t("Receiving")
+                      : t("Starting")
                 }
                 tone={uploadState === "error" ? "danger" : "default"}
               />
               <Stat
                 icon={<Zap className="h-3.5 w-3.5" />}
-                label="Link"
+                label={t("Link")}
                 value={qualityLabel}
               />
               <Stat
                 icon={<MapPin className="h-3.5 w-3.5" />}
-                label="GPS"
-                value={gps ? `±${Math.round(gps.accuracy)} m` : "—"}
+                label={t("GPS")}
+                value={gps ? `±${Math.round(gps.accuracy)} ${t("m")}` : "—"}
               />
             </div>
 
@@ -1460,7 +1474,7 @@ export function CameraStreamView() {
                 className="btn btn-secondary flex-1 border-white/15 bg-white/5 text-slate-100 hover:bg-white/10"
               >
                 <FlipHorizontal className="h-4 w-4" />
-                Flip camera
+                {t("Flip camera")}
               </button>
               {torchSupported ? (
                 <button
@@ -1470,7 +1484,7 @@ export function CameraStreamView() {
                   aria-pressed={torchOn}
                 >
                   <Flashlight className="h-4 w-4" />
-                  {torchOn ? "Torch off" : "Torch on"}
+                  {torchOn ? t("Torch off") : t("Torch on")}
                 </button>
               ) : null}
               <button
@@ -1479,18 +1493,18 @@ export function CameraStreamView() {
                 className="btn btn-danger"
               >
                 <CameraOff className="h-4 w-4" />
-                Stop
+                {t("Stop")}
               </button>
             </div>
 
             {detections.length > 0 ? (
               <section className="space-y-2">
                 <p className="flex items-center justify-between text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">
-                  <span>In view now</span>
+                  <span>{t("In view now")}</span>
                   {groqQueued ? (
                     <span className="flex items-center gap-1 text-[10px] font-bold normal-case tracking-normal text-emerald-300">
                       <Gauge className="h-3 w-3" />
-                      Groq check queued
+                      {t("Groq check queued")}
                     </span>
                   ) : null}
                 </p>
@@ -1502,22 +1516,22 @@ export function CameraStreamView() {
                     >
                       <span className="flex items-center gap-2 text-sm font-semibold">
                         <span className="text-base">{detection.emoji}</span>
-                        {detection.label}
+                        {t(detection.label)}
                         <span className="rounded-full bg-white/10 px-1.5 py-0.5 text-[10px] font-bold text-slate-300">
                           {Math.round(detection.confidence * 100)}%
                         </span>
                         {detection.confirmed ? (
                           <span className="rounded-full bg-emerald-400/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-emerald-300">
-                            Confirmed
+                            {t("Confirmed")}
                           </span>
                         ) : (
                           <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[9px] font-extrabold uppercase tracking-wide text-amber-300">
-                            Checking
+                            {t("Checking")}
                           </span>
                         )}
                       </span>
                       <span className="text-[11px] font-medium text-slate-400">
-                        {detection.direction ?? (detection.moving ? "moving" : "still")}
+                        {t(detection.direction ?? (detection.moving ? "moving" : "still"))}
                       </span>
                     </div>
                   ))}
@@ -1527,21 +1541,21 @@ export function CameraStreamView() {
 
             {gpsError ? (
               <p className="text-[11px] leading-relaxed text-amber-300/80">
-                {gpsError}
+                {t(gpsError)}
               </p>
             ) : null}
 
               <p className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
-              Detection runs on this phone. Only humans and animals are tracked;
-              frames shrink to 320–560 px and slow automatically on 2G/data saver.
-              No video is stored.
+              {t(
+                "Detection runs on this phone. Only humans and animals are tracked; frames shrink to 320–560 px and slow automatically on 2G/data saver. No video is stored.",
+              )}
             </p>
           </>
         ) : null}
 
         <p className="pt-1 text-center text-xs leading-relaxed text-slate-400">
-          Keep this page open and point the rear camera at the field.
+          {t("Keep this page open and point the rear camera at the field.")}
         </p>
       </div>
     </main>

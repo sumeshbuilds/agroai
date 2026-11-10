@@ -1,6 +1,10 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
+import { cookies } from "next/headers";
 import { DM_Sans, Geist_Mono, Noto_Sans_Oriya } from "next/font/google";
+
+import { I18nProvider } from "@/lib/i18n/provider";
+import { LANG_COOKIE, htmlLang, normalizeLang } from "@/lib/i18n/core";
 
 import "./globals.css";
 
@@ -43,13 +47,22 @@ export const viewport: Viewport = {
   themeColor: "#18291f",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+// The root layout personalises <html lang> from the language cookie, so the
+// app is rendered per request rather than as a static shell.
+export const instant = false;
+
+export default async function RootLayout({ children }: { children: ReactNode }) {
+  const cookieStore = await cookies();
+  const lang = normalizeLang(cookieStore.get(LANG_COOKIE)?.value);
+
   return (
     <html
-      lang="en"
+      lang={htmlLang(lang)}
       className={`${dmSans.variable} ${oriya.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full">{children}</body>
+      <body className="min-h-full">
+        <I18nProvider initialLang={lang}>{children}</I18nProvider>
+      </body>
     </html>
   );
 }

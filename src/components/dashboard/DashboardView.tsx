@@ -23,6 +23,7 @@ import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
 import { acresToSquareMetres } from "@/lib/format";
 import { useFarms } from "@/lib/hooks/use-farms";
+import { useI18n } from "@/lib/i18n";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
 import type { DailyForecast, WeatherSnapshot, WeatherWarning } from "@/lib/weather";
 
@@ -40,15 +41,26 @@ function weekday(iso: string) {
 
 /** Per-day suitability for field work (planting / spraying / moving soil). */
 type DayWork = "good" | "fair" | "poor";
+type TFn = (text: string, vars?: Record<string, string | number>) => string;
 
-function dayWork(day: DailyForecast): { level: DayWork; reason: string } {
+function dayWork(day: DailyForecast, t: TFn): { level: DayWork; reason: string } {
   if (day.precipitationProbability >= 60 || day.precipitationSum >= 6)
-    return { level: "poor", reason: `Rain likely — ${Math.round(day.precipitationProbability)}% chance` };
+    return {
+      level: "poor",
+      reason: t("Rain likely — {chance}% chance", {
+        chance: Math.round(day.precipitationProbability),
+      }),
+    };
   if (day.windSpeedMax >= 35)
-    return { level: "poor", reason: `Wind ${Math.round(day.windSpeedMax)} km/h — no spraying` };
+    return {
+      level: "poor",
+      reason: t("Wind {speed} km/h — no spraying", {
+        speed: Math.round(day.windSpeedMax),
+      }),
+    };
   if (day.precipitationProbability >= 30 || day.tempMax >= 40)
-    return { level: "fair", reason: "Isolated showers or heat — plan around it" };
-  return { level: "good", reason: "Dry and calm window" };
+    return { level: "fair", reason: t("Isolated showers or heat — plan around it") };
+  return { level: "good", reason: t("Dry and calm window") };
 }
 
 const DAY_TONES: Record<DayWork, { fill: string; text: string }> = {
@@ -65,6 +77,7 @@ function soilTone(value: number): string {
 }
 
 export function DashboardView() {
+  const { t } = useI18n();
   const { farms, needsSetup, loading: farmsLoading } = useFarms();
   const [farmId, setFarmId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -206,12 +219,12 @@ export function DashboardView() {
   if (!hasFarms) {
     return (
       <div className="px-4 py-6 sm:px-6">
-        <h1 className="sr-only">Field workstation</h1>
+        <h1 className="sr-only">{t("Field workstation")}</h1>
         <WorkbenchBar
           left={
             <span className="flex items-center gap-2 text-sm font-semibold">
               <LayoutGrid className="h-4 w-4 text-[var(--color-ink-soft)]" />
-              Field workstation
+              {t("Field workstation")}
             </span>
           }
         />
@@ -221,15 +234,13 @@ export function DashboardView() {
             <MapPin className="h-6 w-6" />
           </span>
           <div>
-            <h2 className="text-2xl font-semibold">Map your first field</h2>
+            <h2 className="text-2xl font-semibold">{t("Map your first field")}</h2>
             <p className="muted mx-auto mt-3 max-w-sm text-sm leading-relaxed">
-              Trace the boundary on the satellite map. Its centre then powers
-              live weather, growth guides and camera tracking for this
-              workstation.
+              {t("Trace the boundary on the satellite map. Its centre then powers live weather, growth guides and camera tracking for this workstation.")}
             </p>
           </div>
           <Link href="/map" className="btn btn-primary">
-            Open field map
+            {t("Open field map")}
             <ArrowRight className="h-4 w-4" />
           </Link>
         </section>
@@ -243,8 +254,8 @@ export function DashboardView() {
 
   return (
     <div className="flex min-h-full flex-col px-4 py-5 sm:px-6 xl:h-full xl:min-h-0 xl:py-6">
-      <h1 className="sr-only">Field workstation</h1>
-      <CameraAlarmBanner className="mb-5" intervalMs={6_000} />
+      <h1 className="sr-only">{t("Field workstation")}</h1>
+      <CameraAlarmBanner intervalMs={6_000} />
 
       <WorkbenchBar
         left={
@@ -264,7 +275,7 @@ export function DashboardView() {
       <div className="mt-5 flex flex-1 flex-col gap-6 xl:min-h-0 xl:flex-row xl:gap-5 xl:overflow-hidden">
         {/* Analytics column — scrolls on its own on desktop */}
         <section
-          aria-label="Field analytics"
+          aria-label={t("Field analytics")}
           tabIndex={0}
           className="order-2 space-y-4 focus-visible:outline-offset-[-2px] xl:order-1 xl:min-h-0 xl:w-[24rem] xl:shrink-0 xl:overflow-y-auto xl:pr-1 xl:pb-2"
         >
@@ -284,13 +295,17 @@ export function DashboardView() {
                 <p className="text-[1.375rem] font-semibold leading-tight tabular-nums">
                   {areaSqm ? Math.round(areaSqm).toLocaleString() : "—"}
                   <span className="ml-1 text-[0.6875rem] font-medium uppercase text-[var(--color-ink-soft)]">
-                    sqm
+                    {t("sqm")}
                   </span>
                 </p>
                 {farmCameras.length > 0 ? (
                   <p className="mt-2 text-[0.6875rem] font-medium text-leaf-700">
-                    {farmCameras.filter((camera) => camera.isLive).length}{" "}
-                    camera{farmCameras.length === 1 ? "" : "s"} linked
+                    {t(
+                      farmCameras.length === 1
+                        ? "{count} camera linked"
+                        : "{count} cameras linked",
+                      { count: farmCameras.filter((camera) => camera.isLive).length },
+                    )}
                   </p>
                 ) : null}
               </div>
@@ -308,7 +323,7 @@ export function DashboardView() {
 
         {/* Map column */}
         <section
-          aria-label="Satellite map"
+          aria-label={t("Satellite map")}
           className="order-1 flex flex-col gap-4 xl:order-2 xl:min-h-0 xl:flex-1"
         >
           <div className="relative overflow-hidden rounded-2xl xl:min-h-0 xl:flex-1">
@@ -352,7 +367,7 @@ export function DashboardView() {
                 className="toolbar-btn absolute right-3 top-3 z-[600] border-transparent text-xs"
               >
                 <Sprout className="h-3.5 w-3.5" />
-                Field details
+                {t("Field details")}
               </button>
             )}
           </div>
@@ -455,6 +470,7 @@ function MetricsGrid({
   weather: WeatherSnapshot | null;
   loading: boolean;
 }) {
+  const { t } = useI18n();
   const today = weather?.daily[0];
   const current = weather?.current;
 
@@ -462,9 +478,9 @@ function MetricsGrid({
     <div className="grid grid-cols-2 gap-3">
       <MetricTile
         icon={<Thermometer className="h-4 w-4" />}
-        label="Temperature"
+        label={t("Temperature")}
         tone="accent"
-        unit="°C"
+        unit={t("°C")}
         value={
           current?.temperature === null || current?.temperature === undefined
             ? "—"
@@ -473,8 +489,8 @@ function MetricsGrid({
         rows={
           today
             ? [
-                { label: "Max", value: `${Math.round(today.tempMax)}°` },
-                { label: "Min", value: `${Math.round(today.tempMin)}°` },
+                { label: t("Max"), value: `${Math.round(today.tempMax)}°` },
+                { label: t("Min"), value: `${Math.round(today.tempMin)}°` },
               ]
             : undefined
         }
@@ -482,9 +498,9 @@ function MetricsGrid({
       />
       <MetricTile
         icon={<Droplets className="h-4 w-4" />}
-        label="Humidity"
+        label={t("Humidity")}
         tone="info"
-        unit="%"
+        unit={t("%")}
         value={
           current?.humidity === null || current?.humidity === undefined
             ? "—"
@@ -494,12 +510,12 @@ function MetricsGrid({
           today
             ? [
                 {
-                  label: "Rain chance",
+                  label: t("Rain chance"),
                   value: `${today.precipitationProbability}%`,
                 },
                 {
-                  label: "Rain total",
-                  value: `${(today.precipitationSum ?? 0).toFixed(1)} mm`,
+                  label: t("Rain total"),
+                  value: `${(today.precipitationSum ?? 0).toFixed(1)} ${t("mm")}`,
                 },
               ]
             : undefined
@@ -508,9 +524,9 @@ function MetricsGrid({
       />
       <MetricTile
         icon={<Droplets className="h-4 w-4" />}
-        label="Soil moisture"
+        label={t("Soil moisture")}
         tone="leaf"
-        unit="%"
+        unit={t("%")}
         value={
           current?.soilMoisture === null || current?.soilMoisture === undefined
             ? "—"
@@ -520,20 +536,20 @@ function MetricsGrid({
           today
             ? [
                 {
-                  label: "Rain chance",
+                  label: t("Rain chance"),
                   value: `${today.precipitationProbability}%`,
                 },
               ]
             : undefined
         }
-        hint="model · top 0–1 cm"
+        hint={t("model · top 0–1 cm")}
         loading={loading}
       />
       <MetricTile
         icon={<Wind className="h-4 w-4" />}
-        label="Wind"
+        label={t("Wind")}
         tone="soil"
-        unit="km/h"
+        unit={t("km/h")}
         value={
           current?.windSpeed === null || current?.windSpeed === undefined
             ? "—"
@@ -541,7 +557,7 @@ function MetricsGrid({
         }
         rows={
           today
-            ? [{ label: "Gusts to", value: `${Math.round(today.windSpeedMax ?? 0)}` }]
+            ? [{ label: t("Gusts to"), value: `${Math.round(today.windSpeedMax ?? 0)}` }]
             : undefined
         }
         loading={loading}
@@ -557,23 +573,27 @@ function OutlookCard({
   days: DailyForecast[];
   loading: boolean;
 }) {
-  const works = days.map(dayWork);
+  const { t } = useI18n();
+  const works = days.map((day) => dayWork(day, t));
   const goodDays = works.filter((work) => work.level === "good").length;
 
   const verdict = days.length
     ? goodDays >= 5
-      ? { label: "Good for planting", tone: "text-leaf-700" }
+      ? { label: t("Good for planting"), tone: "text-leaf-700" }
       : goodDays >= 3
-        ? { label: "Fair for field work", tone: "text-warn-700" }
+        ? { label: t("Fair for field work"), tone: "text-warn-700" }
         : goodDays >= 1
-          ? { label: "Watch the rain", tone: "text-warn-700" }
-          : { label: "Too wet — check drainage", tone: "text-danger-700" }
-    : { label: loading ? "Awaiting forecast" : "Forecast unavailable", tone: "text-[var(--color-ink-soft)]" };
+          ? { label: t("Watch the rain"), tone: "text-warn-700" }
+          : { label: t("Too wet — check drainage"), tone: "text-danger-700" }
+    : {
+        label: loading ? t("Awaiting forecast") : t("Forecast unavailable"),
+        tone: "text-[var(--color-ink-soft)]",
+      };
 
   return (
     <section className="card p-5">
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Field-work outlook</h2>
+        <h2 className="text-base font-semibold">{t("Field-work outlook")}</h2>
         <span className={`text-xs font-medium ${verdict.tone}`}>
           {verdict.label}
         </span>
@@ -583,42 +603,47 @@ function OutlookCard({
         <div className="mt-3 h-10 animate-pulse-soft rounded-lg bg-paper-deep" />
       ) : days.length === 0 ? (
         <p className="muted mt-3 text-sm leading-relaxed">
-          No forecast is available for this field right now. Weather refreshes
-          automatically — check back shortly.
+          {t("No forecast is available for this field right now. Weather refreshes automatically — check back shortly.")}
         </p>
       ) : (
         <>
           <div
             className="mt-4 flex h-10 gap-1"
             role="img"
-            aria-label={`${goodDays} of ${days.length} forecast days look workable`}
+            aria-label={t("{good} of {days} forecast days look workable", {
+              good: goodDays,
+              days: days.length,
+            })}
           >
             {works.map((work, index) => (
               <span
                 key={days[index].date}
-                title={`${weekday(days[index].date)} · ${work.reason}`}
+                title={`${t(weekday(days[index].date))} · ${work.reason}`}
                 className={`w-full flex-1 rounded-md ${DAY_TONES[work.level].fill}`}
                 aria-hidden
               />
             ))}
           </div>
           <div className="muted mt-2 flex justify-between text-[0.6875rem] tabular-nums">
-            <span>Today</span>
-            <span>+3d</span>
-            <span>{weekday(days[days.length - 1].date)}</span>
+            <span>{t("Today")}</span>
+            <span>{t("+3d")}</span>
+            <span>{t(weekday(days[days.length - 1].date))}</span>
           </div>
           <footer className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--card-muted)] px-3 py-3">
             <p className="text-xs font-medium leading-snug">
-              {goodDays} of {days.length} days look workable
+              {t("{good} of {days} days look workable", {
+                good: goodDays,
+                days: days.length,
+              })}
               <span className="muted mt-1 block text-[0.6875rem] font-normal leading-relaxed">
-                estimate from the 7-day forecast, not a guarantee
+                {t("estimate from the 7-day forecast, not a guarantee")}
               </span>
             </p>
             <span className="chip shrink-0 bg-[var(--color-ink)] text-[#f5f4ef]">
               <svg viewBox="0 0 16 16" className="h-3 w-3 fill-accent-300" aria-hidden>
                 <path d="M8 0l1.8 5.4L16 8l-6.2 2.6L8 16l-1.8-5.4L0 8l6.2-2.6L8 0z" />
               </svg>
-              AI Insights
+              {t("AI Insights")}
             </span>
           </footer>
         </>
@@ -634,6 +659,7 @@ function SoilCard({
   points: WeatherSnapshot["hourlySoilMoisture"];
   loading: boolean;
 }) {
+  const { t } = useI18n();
   const hourLabel = (iso: string) => iso.slice(11, 16);
   const slice = points.slice(0, 24).filter((point) => point.value !== null);
   const empty = !loading && slice.length === 0;
@@ -641,10 +667,10 @@ function SoilCard({
   return (
     <section className="card p-5">
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Soil moisture</h2>
+        <h2 className="text-base font-semibold">{t("Soil moisture")}</h2>
         <span className="chip bg-[var(--card-muted)] text-[var(--color-ink-soft)]">
           <Gauge className="h-3 w-3" />
-          24h · model
+          {t("24h · model")}
         </span>
       </header>
 
@@ -652,15 +678,14 @@ function SoilCard({
         <div className="mt-4 h-20 animate-pulse-soft rounded-lg bg-paper-deep" />
       ) : empty ? (
         <p className="muted mt-3 text-[0.78rem] leading-relaxed">
-          No soil estimate for this location. The value appears once Open-Meteo
-          covers the field&apos;s coordinates.
+          {t("No soil estimate for this location. The value appears once Open-Meteo covers the field's coordinates.")}
         </p>
       ) : (
         <>
           <div
             className="mt-4 flex h-20 items-end gap-[2px]"
             role="img"
-            aria-label="Surface soil moisture for the next 24 hours"
+            aria-label={t("Surface soil moisture for the next 24 hours")}
           >
             {slice.map((point, index) => {
               const value = point.value ?? 0;
@@ -672,7 +697,7 @@ function SoilCard({
               return (
                 <span
                   key={point.time + String(index)}
-                  title={`${hourLabel(point.time)} · ${Math.round(value * 100)}% moisture`}
+                  title={`${hourLabel(point.time)} · ${Math.round(value * 100)}% ${t("Soil moisture")}`}
                   className={`w-full flex-1 rounded-t-[3px] ${soilTone(value)}`}
                   style={{ height: `${height}%` }}
                 />
@@ -699,6 +724,7 @@ function ForecastCard({
   warnings: WeatherWarning[];
   loading: boolean;
 }) {
+  const { t } = useI18n();
   const fetchedAt = weather?.fetchedAt
     ? new Date(weather.fetchedAt).toLocaleTimeString(undefined, {
         hour: "2-digit",
@@ -709,10 +735,10 @@ function ForecastCard({
   return (
     <section className="card p-5">
       <header className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-base font-semibold">Weather forecast</h2>
+        <h2 className="text-base font-semibold">{t("Weather forecast")}</h2>
         {fetchedAt ? (
           <span className="muted text-[0.6875rem] tabular-nums">
-            live · {fetchedAt}
+            {t("live · {time}", { time: fetchedAt })}
           </span>
         ) : null}
       </header>
@@ -728,8 +754,7 @@ function ForecastCard({
         </div>
       ) : !weather ? (
         <p className="muted mt-3 text-[0.78rem] leading-relaxed">
-          Could not load live weather for this field right now. It refreshes on
-          its own — check back shortly.
+          {t("Could not load live weather for this field right now. It refreshes on its own — check back shortly.")}
         </p>
       ) : (
         <>
@@ -738,7 +763,7 @@ function ForecastCard({
               {warnings.slice(0, 3).map((warning) => (
                 <li
                   key={warning.title}
-                  title={warning.detail}
+                  title={t(warning.detail)}
                   className="flex items-start gap-1.5 rounded-lg bg-[var(--card-muted)] px-2.5 py-2 text-[0.74rem]"
                 >
                   <TriangleAlert
@@ -749,9 +774,9 @@ function ForecastCard({
                     }`}
                   />
                   <span>
-                    <span className="font-semibold">{warning.title}</span>
+                    <span className="font-semibold">{t(warning.title)}</span>
                     <span className="muted block text-[0.68rem] leading-snug">
-                      {warning.detail}
+                      {t(warning.detail)}
                     </span>
                   </span>
                 </li>
@@ -760,20 +785,20 @@ function ForecastCard({
           ) : (
             <p className="muted mt-2 flex items-center gap-1.5 text-[0.72rem]">
               <span className="h-1.5 w-1.5 rounded-full bg-leaf-500" />
-              No rain, wind or heat warnings for the next 3 days
+              {t("No rain, wind or heat warnings for the next 3 days")}
             </p>
           )}
 
           <ul className="mt-2.5 space-y-0.5">
             {weather.daily.slice(0, 7).map((day, index) => {
-              const work = dayWork(day);
+              const work = dayWork(day, t);
               return (
                 <li
                   key={day.date}
                   className="flex items-center gap-2 rounded-lg px-1.5 py-1.5 text-[0.78rem] hover:bg-[var(--card-muted)]"
                 >
                   <span className="w-9 shrink-0 font-semibold">
-                    {index === 0 ? "Today" : weekday(day.date)}
+                    {index === 0 ? t("Today") : t(weekday(day.date))}
                   </span>
                   <span
                     className={`h-4 w-1 shrink-0 rounded-full ${DAY_TONES[work.level].fill}`}

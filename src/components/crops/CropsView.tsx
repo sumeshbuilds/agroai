@@ -31,6 +31,7 @@ import {
 import { PEST_LEVEL_META, type PestRiskAssessment } from "@/lib/pest-risk";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useFarms } from "@/lib/hooks/use-farms";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
 import type { WeatherSnapshot } from "@/lib/weather";
@@ -55,6 +56,7 @@ function GaugeRing({
   caption: string;
   credit: string;
 }) {
+  const { t } = useI18n();
   const radius = 50;
   const circumference = 2 * Math.PI * radius;
   const shown =
@@ -77,7 +79,7 @@ function GaugeRing({
           viewBox="0 0 118 118"
           className="h-full w-full -rotate-90"
           role="img"
-          aria-label={`${label}: ${percent === null ? "no data" : `${shown}%`}`}
+          aria-label={`${label}: ${percent === null ? t("No data") : `${shown}%`}`}
         >
           <circle
             cx="59"
@@ -134,19 +136,20 @@ function CropGlyphTile({
   selected: boolean;
   onSelect: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <button
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
       className="crop-tile"
-      title={crop.cropName}
+      title={t(crop.cropName)}
     >
       <span aria-hidden className="text-[2.1rem] leading-none select-none">
         {getCropPreset(crop.cropName).emoji}
       </span>
       <span className="max-w-full truncate px-2 text-xs font-semibold">
-        {crop.cropName}
+        {t(crop.cropName)}
       </span>
 
       {selected ? (
@@ -163,6 +166,7 @@ function CropGlyphTile({
 /* ------------------------------------------------------------------------- */
 
 export function CropsView() {
+  const { t } = useI18n();
   const { farms, needsSetup } = useFarms();
 
   const [crops, setCrops] = useState<CropDTO[]>([]);
@@ -341,7 +345,7 @@ export function CropsView() {
         durationDays: Number(durationDays) || undefined,
       });
       setNoticeTone("success");
-      setNotice(`Added ${crop.cropName}. Tap its tile to open today's guide.`);
+      setNotice(t("Added {crop}. Tap its tile to open today's guide.", { crop: t(crop.cropName) }));
       setSelectedCropId(crop.id);
       setShowAdd(false);
       await loadAll();
@@ -367,7 +371,12 @@ export function CropsView() {
       setNoticeTone("success");
       setNotice(
         result.message ??
-          `Generated ${result.generated.length} report${result.generated.length === 1 ? "" : "s"}.`,
+          t(
+            result.generated.length === 1
+              ? "Generated {count} report."
+              : "Generated {count} reports.",
+            { count: result.generated.length },
+          ),
       );
     } catch (cause) {
       setNoticeTone("danger");
@@ -399,18 +408,18 @@ export function CropsView() {
   const rainToday = weather?.daily[0]?.precipitationProbability ?? null;
 
   const waterCaption = weatherLoading
-    ? "Reading live weather…"
+    ? t("Reading live weather…")
     : soilPct === null
       ? selectedFarm
-        ? "No soil estimate for this field yet."
-        : "Link the crop to a mapped field to enable this."
+        ? t("No soil estimate for this field yet.")
+        : t("Link the crop to a mapped field to enable this.")
       : (rainToday ?? 0) >= 50
-        ? `${rainToday}% rain today — it may cover you.`
+        ? t("{rain}% rain today — it may cover you.", { rain: rainToday ?? 0 })
         : soilPct < 18
-          ? "Topsoil is drying — irrigate soon."
+          ? t("Topsoil is drying — irrigate soon.")
           : soilPct < 28
-            ? "Moisture OK — recheck tomorrow."
-            : "Plenty of moisture — no watering needed.";
+            ? t("Moisture OK — recheck tomorrow.")
+            : t("Plenty of moisture — no watering needed.");
 
   /* Pesticide ring: real rule-based risk score mapped onto the ring. */
   const pestTone =
@@ -423,18 +432,18 @@ export function CropsView() {
           : ("danger" as const);
 
   const pestCaption = pestLoading
-    ? "Analysing the forecast…"
+    ? t("Analysing the forecast…")
     : pest
-      ? `${PEST_LEVEL_META[pest.level].label} — ${pest.threats[0]?.name ?? "scout routinely"}`
+      ? `${t(PEST_LEVEL_META[pest.level].label)} — ${pest.threats[0]?.name ? t(pest.threats[0].name) : t("scout routinely")}`
       : selectedCrop
-        ? "Could not analyse — generate a report to retry."
-        : "Select a crop.";
+        ? t("Could not analyse — generate a report to retry.")
+        : t("Select a crop.");
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:py-8">
       <SectionHeading
-        title="Crops"
-        subtitle="Tap a crop to open its day guide — watering and pest watch update from the field’s live weather."
+        title={t("Crops")}
+        subtitle={t("Tap a crop to open its day guide — watering and pest watch update from the field’s live weather.")}
         icon={<CalendarDays aria-hidden className="h-5 w-5" />}
         action={
           <Button
@@ -444,7 +453,7 @@ export function CropsView() {
             disabled={needsSetup || crops.length === 0}
           >
             <RefreshCw aria-hidden className="h-4 w-4" />
-            Generate weekly advisory
+            {t("Generate weekly advisory")}
           </Button>
         }
       />
@@ -454,7 +463,7 @@ export function CropsView() {
       {notice ? <Callout tone={noticeTone}>{notice}</Callout> : null}
 
       {/* Crop selection stays horizontally scrollable on small screens. */}
-      <section aria-label="Your crops">
+      <section aria-label={t("Your crops")}>
         <div className="-m-1 flex items-center gap-3 overflow-x-auto p-1 pb-3">
           {loading ? (
             Array.from({ length: 3 }).map((_, index) => (
@@ -491,7 +500,7 @@ export function CropsView() {
                   <Plus className="h-5 w-5" strokeWidth={2.4} />
                 )}
                 <span className="text-xs font-semibold">
-                  {showAdd ? "Close" : "Add"}
+                  {showAdd ? t("Close") : t("Add")}
                 </span>
               </button>
             </>
@@ -499,8 +508,11 @@ export function CropsView() {
         </div>
         {!loading && crops.length > 0 ? (
           <p className="muted mt-2 text-xs">
-            {crops.length} crop{crops.length === 1 ? "" : "s"} on the farm
-            {activeCrop ? " · active one is used by the dashboard" : ""}
+            {t(
+              crops.length === 1 ? "{count} crop on the farm" : "{count} crops on the farm",
+              { count: crops.length },
+            )}
+            {activeCrop ? t(" · active one is used by the dashboard") : ""}
           </p>
         ) : null}
       </section>
@@ -509,11 +521,11 @@ export function CropsView() {
       {showAdd ? (
         <section id="add-crop-form" className="card animate-rise space-y-5 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-2">
-            <h2 className="text-lg font-semibold">Add a crop</h2>
+            <h2 className="text-lg font-semibold">{t("Add a crop")}</h2>
             <button
               type="button"
               onClick={() => setShowAdd(false)}
-              aria-label="Close add crop form"
+              aria-label={t("Close add crop form")}
               className="icon-btn -mr-2 -mt-2 border-transparent bg-transparent text-ink-soft"
             >
               <X className="h-4 w-4" />
@@ -521,14 +533,13 @@ export function CropsView() {
           </div>
 
           {farms.length === 0 ? (
-            <Callout tone="warn" title="No farmland yet">
+            <Callout tone="warn" title={t("No farmland yet")}>
               <p>
-                Draw your field boundary first so the guides and trackers use
-                its exact weather.
+                {t("Draw your field boundary first so the guides and trackers use its exact weather.")}
               </p>
               <p className="mt-2">
                 <Link href="/map" className="inline-flex min-h-11 items-center font-semibold underline underline-offset-4">
-                  Go to the field map →
+                  {t("Go to the field map →")}
                 </Link>
               </p>
             </Callout>
@@ -553,7 +564,7 @@ export function CropsView() {
                   <span aria-hidden className="text-[1.05rem]">
                     {getCropPreset(option).emoji}
                   </span>
-                  {option}
+                  {t(option)}
                 </button>
               );
             })}
@@ -562,7 +573,7 @@ export function CropsView() {
           <div className="grid gap-4 sm:grid-cols-3">
             <label className="block">
               <span className="text-sm font-medium">
-                Sowing date
+                {t("Sowing date")}
               </span>
               <input
                 type="date"
@@ -574,7 +585,7 @@ export function CropsView() {
             </label>
             <label className="block">
               <span className="text-sm font-medium">
-                Duration (days)
+                {t("Duration (days)")}
               </span>
               <input
                 type="number"
@@ -591,7 +602,7 @@ export function CropsView() {
             </label>
             {farms.length > 1 ? (
               <label className="block">
-                <span className="text-sm font-medium">Field</span>
+                <span className="text-sm font-medium">{t("Field")}</span>
                 <select
                   className="select mt-2"
                   value={effectiveFarmlandId}
@@ -613,7 +624,7 @@ export function CropsView() {
             disabled={needsSetup || farms.length === 0 || !effectiveSowingDate}
           >
             <Plus className="h-4 w-4" />
-            Add {cropName}
+            {t("Add {crop}", { crop: t(cropName) })}
           </Button>
         </section>
       ) : null}
@@ -622,7 +633,7 @@ export function CropsView() {
       {selectedCrop && guide ? (
         <section
           className="card p-5 sm:p-6"
-          aria-label={`Today for ${selectedCrop.cropName}`}
+          aria-label={t("Today for {crop}", { crop: t(selectedCrop.cropName) })}
         >
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="flex min-w-0 flex-[1_1_22rem] items-start gap-3.5">
@@ -631,24 +642,24 @@ export function CropsView() {
               </span>
               <div className="min-w-0">
                 <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold leading-tight">
-                  {guide.cropName}
-                  <span className="chip chip-brand">Day {guide.ageDays}</span>
+                  {t(guide.cropName)}
+                  <span className="chip chip-brand">{t("Day {day}", { day: guide.ageDays })}</span>
                 </h2>
                 <p className="muted mt-1.5 break-words text-sm">
-                  {selectedCrop.farmlandName ?? "No field linked"}
+                  {selectedCrop.farmlandName ?? t("No field linked")}
                 </p>
                 <p className="muted mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs tabular-nums">
-                  <span>{guide.stage.name}</span>
+                  <span>{t(guide.stage.name)}</span>
                   <span aria-hidden>·</span>
                   <span className="inline-flex items-center gap-1">
                     <CalendarDays className="h-3 w-3" />
-                    sown {selectedCrop.sowingDate}
+                    {t("sown {date}", { date: selectedCrop.sowingDate })}
                   </span>
                   {guide.isHarvestWindow ? (
-                    <span className="chip chip-lime">Harvest window</span>
+                    <span className="chip chip-lime">{t("Harvest window")}</span>
                   ) : (
                     <span>
-                      {guide.daysToHarvest} days to harvest
+                      {t("{count} days to harvest", { count: guide.daysToHarvest })}
                     </span>
                   )}
                 </p>
@@ -661,7 +672,7 @@ export function CropsView() {
               loading={generatingId === selectedCrop.id}
             >
               <Sparkles className="h-3.5 w-3.5" />
-              Weekly advisory
+              {t("Weekly advisory")}
             </Button>
           </div>
 
@@ -669,7 +680,7 @@ export function CropsView() {
             {/* Left: what today is about (real stage guide text) */}
             <div className="max-w-xl min-w-0 flex-1">
               <p className="text-base leading-relaxed">
-                {guide.stage.focus}
+                {t(guide.stage.focus)}
               </p>
               <ul className="mt-4 space-y-2.5">
                 {guide.stage.tasks.slice(0, 3).map((task) => (
@@ -681,19 +692,19 @@ export function CropsView() {
                       aria-hidden
                       className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-leaf-500"
                     />
-                    {task}
+                    {t(task)}
                   </li>
                 ))}
               </ul>
               <div className="mt-5 max-w-sm">
                 <div className="flex items-center justify-between text-xs font-medium">
-                  <span className="muted">Season progress</span>
+                  <span className="muted">{t("Season progress")}</span>
                   <span className="tabular-nums">{guide.progress}%</span>
                 </div>
                 <div
                   className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--card-muted)]"
                   role="progressbar"
-                  aria-label="Season progress"
+                  aria-label={t("Season progress")}
                   aria-valuenow={guide.progress}
                   aria-valuemin={0}
                   aria-valuemax={100}
@@ -713,9 +724,9 @@ export function CropsView() {
                 percent={soilPct}
                 tone="info"
                 icon={<Droplets aria-hidden className="h-8 w-8 text-info-500" strokeWidth={2} />}
-                label="Watering"
+                label={t("Watering")}
                 caption={waterCaption}
-                credit="Open-Meteo soil estimate · top 0–1 cm"
+                credit={t("Open-Meteo soil estimate · top 0–1 cm")}
               />
               <GaugeRing
                 percent={pest ? pest.score : null}
@@ -726,9 +737,9 @@ export function CropsView() {
                   pestTone === "warn" && "text-warn-600",
                   pestTone === "danger" && "text-danger-600",
                 )} strokeWidth={2} />}
-                label="Pesticide watch"
+                label={t("Pesticide watch")}
                 caption={pestCaption}
-                credit="Rule engine on live weather · not a spray order"
+                credit={t("Rule engine on live weather · not a spray order")}
               />
             </div>
           </div>
@@ -736,26 +747,28 @@ export function CropsView() {
       ) : !loading ? (
         <EmptyState
            icon={<Sprout aria-hidden className="h-6 w-6" />}
-          title="No crops added yet"
-          description="Tap the dashed Add tile above to plant your first crop — the day guide and trackers unlock immediately."
+          title={t("No crops added yet")}
+          description={t("Tap the dashed Add tile above to plant your first crop — the day guide and trackers unlock immediately.")}
           action={
             <Button onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" />
-              Add your first crop
+              {t("Add your first crop")}
             </Button>
           }
         />
       ) : null}
 
       {/* One weekly plan for the crop currently selected */}
-      <section className="space-y-4 pt-2" aria-label="Weekly action plan">
+      <section className="space-y-4 pt-2" aria-label={t("Weekly action plan")}>
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 className="text-lg font-semibold">Weekly action plan</h2>
+            <h2 className="text-lg font-semibold">{t("Weekly action plan")}</h2>
             <p className="muted mt-1 text-xs">
               {selectedCrop
-                ? `One plan for ${selectedCrop.cropName}, built from its crop stage and this week's forecast.`
-                : "Add a crop to get its weekly plan."}
+                ? t("One plan for {crop}, built from its crop stage and this week's forecast.", {
+                    crop: t(selectedCrop.cropName),
+                  })
+                : t("Add a crop to get its weekly plan.")}
             </p>
           </div>
           {selectedCrop ? (
@@ -765,13 +778,13 @@ export function CropsView() {
               loading={generatingId === selectedCrop.id}
             >
               <RefreshCw aria-hidden className="h-4 w-4" />
-              Refresh this plan
+              {t("Refresh this plan")}
             </Button>
           ) : null}
         </div>
 
         {currentReportLoading ? (
-          <div className="card h-40 animate-pulse-soft" aria-label="Loading weekly plan" />
+          <div className="card h-40 animate-pulse-soft" aria-label={t("Loading weekly plan")} />
         ) : currentReport ? (
           <ReportCard
             report={currentReport}
@@ -783,13 +796,13 @@ export function CropsView() {
             icon={<MapIcon className="h-7 w-7" />}
             title={
               selectedCrop
-                ? `No plan for ${selectedCrop.cropName} yet`
-                : "No weekly plan yet"
+                ? t("No plan for {crop} yet", { crop: t(selectedCrop.cropName) })
+                : t("No weekly plan yet")
             }
             description={
               selectedCrop
-                ? "Generate one to get a 4-point action plan and a short list of inputs this crop may need."
-                : "Generate one to see a 4-point action plan for the coming week."
+                ? t("Generate one to get a 4-point action plan and a short list of inputs this crop may need.")
+                : t("Generate one to see a 4-point action plan for the coming week.")
             }
             action={
               selectedCrop ? (
@@ -798,7 +811,7 @@ export function CropsView() {
                   loading={generatingId === selectedCrop.id}
                 >
                   <Sparkles aria-hidden className="h-4 w-4" />
-                  Generate for {selectedCrop.cropName}
+                  {t("Generate for {crop}", { crop: t(selectedCrop.cropName) })}
                 </Button>
               ) : undefined
             }

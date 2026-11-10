@@ -1,6 +1,9 @@
+"use client";
+
 import { CalendarDays, CheckCircle2, ChevronRight, Sprout, TriangleAlert } from "lucide-react";
 
 import { getCropDayGuide } from "@/lib/crop-guide";
+import { useI18n } from "@/lib/i18n";
 import type { CropDTO } from "@/lib/types";
 
 /**
@@ -8,6 +11,7 @@ import type { CropDTO } from "@/lib/types";
  * the crop day they entered during onboarding (plus the expected duration).
  */
 export function CropDayGuide({ crop }: { crop: CropDTO }) {
+  const { t } = useI18n();
   const guide = getCropDayGuide(crop.cropName, crop.ageDays, crop.durationDays);
 
   return (
@@ -18,16 +22,21 @@ export function CropDayGuide({ crop }: { crop: CropDTO }) {
             <Sprout className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <h2 className="text-lg font-semibold leading-snug">{crop.cropName} — today in the field</h2>
+            <h2 className="text-lg font-semibold leading-snug">
+              {t("{crop} — today in the field", { crop: t(crop.cropName) })}
+            </h2>
             <p className="muted mt-1 text-xs leading-relaxed">
               {crop.farmlandName ? `${crop.farmlandName} · ` : ""}
-              Day {guide.ageDays} of {guide.durationDays}
+              {t("Day {day} of {total}", {
+                day: guide.ageDays,
+                total: guide.durationDays,
+              })}
             </p>
           </div>
         </div>
         <span className="chip chip-lime">
           <Sprout className="h-3.5 w-3.5" />
-          {guide.stage.name}
+          {t(guide.stage.name)}
         </span>
       </header>
 
@@ -36,14 +45,14 @@ export function CropDayGuide({ crop }: { crop: CropDTO }) {
           <span className="muted inline-flex items-center gap-1.5 font-medium">
             <CalendarDays className="h-3.5 w-3.5" />
             {guide.isHarvestWindow
-              ? "Harvest window is open"
-              : `Harvest in about ${guide.daysToHarvest} days`}
+              ? t("Harvest window is open")
+              : t("Harvest in about {days} days", { days: guide.daysToHarvest })}
           </span>
           <span className="font-semibold tabular-nums">{guide.progress}%</span>
         </div>
         <div
           role="progressbar"
-          aria-label={`${crop.cropName} season progress`}
+          aria-label={t("{crop} season progress", { crop: t(crop.cropName) })}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={guide.progress}
@@ -57,18 +66,18 @@ export function CropDayGuide({ crop }: { crop: CropDTO }) {
       </div>
 
       <p className="mt-3.5 text-sm font-semibold leading-relaxed">
-        {guide.stage.focus}
+        {t(guide.stage.focus)}
       </p>
 
       <div className="mt-5 space-y-3">
         <h3 className="text-sm font-semibold">
-          Do these now
+          {t("Do these now")}
         </h3>
         <ul className="space-y-2">
           {guide.stage.tasks.map((task) => (
             <li key={task} className="flex items-start gap-2 text-sm">
               <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-meadow-600" />
-              <span>{task}</span>
+              <span>{t(task)}</span>
             </li>
           ))}
         </ul>
@@ -78,7 +87,7 @@ export function CropDayGuide({ crop }: { crop: CropDTO }) {
         {guide.stage.watchFor.map((item) => (
           <span key={item} className="chip chip-warn max-w-full whitespace-normal">
             <TriangleAlert className="h-3 w-3" />
-            {item}
+            {t(item)}
           </span>
         ))}
       </div>
@@ -87,13 +96,15 @@ export function CropDayGuide({ crop }: { crop: CropDTO }) {
         <p className="muted mt-3.5 flex items-start gap-1.5 border-t border-[var(--border)] pt-3 text-xs">
           <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <span>
-            Next stage: <strong className="text-[var(--foreground)]">{guide.nextStage.name}</strong>{" "}
-            from day {guide.nextStage.fromDay}.
+            {t("Next stage: {stage} from day {day}.", {
+              stage: t(guide.nextStage.name),
+              day: guide.nextStage.fromDay,
+            })}
           </span>
         </p>
       ) : (
         <p className="muted mt-3.5 border-t border-[var(--border)] pt-3 text-xs">
-          This is the final stage of the crop cycle.
+          {t("This is the final stage of the crop cycle.")}
         </p>
       )}
     </section>

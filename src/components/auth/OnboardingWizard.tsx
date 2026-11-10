@@ -26,6 +26,7 @@ import {
   defaultDurationDays,
   getCropDayGuide,
 } from "@/lib/crop-guide";
+import { useI18n } from "@/lib/i18n";
 import type { FarmDTO } from "@/lib/types";
 
 const MapDrawer = dynamic(
@@ -55,6 +56,7 @@ function suggestPin(name: string): string {
 
 export function OnboardingWizard() {
   const router = useRouter();
+  const { t } = useI18n();
 
   const [step, setStep] = useState(0);
   const [checking, setChecking] = useState(true);
@@ -88,6 +90,9 @@ export function OnboardingWizard() {
     try {
       const { farms: available } = await api.listAvailableFarms();
       setFarms(available);
+      // With nothing to claim, drawing a boundary is the only path forward,
+      // so open the map automatically.
+      if (available.length === 0) setShowMap(true);
       setFarmId((current) =>
         current !== null && available.some((farm) => farm.id === current)
           ? current
@@ -247,12 +252,12 @@ export function OnboardingWizard() {
           AgroAI
         </Link>
         <Link href="/login" className="btn btn-ghost text-sm">
-          <span className="hidden sm:inline">Already registered?</span> Sign in
+          <span className="hidden sm:inline">{t("Already registered?")}</span> {t("Sign in")}
         </Link>
       </header>
 
       <div className="mt-8 sm:mt-10">
-        <ol className="grid grid-cols-4 gap-3" aria-label="Onboarding progress">
+        <ol className="grid grid-cols-4 gap-3" aria-label={t("Onboarding progress")}>
           {STEPS.map((entry, index) => {
             const Icon = entry.icon;
             const done = index < step;
@@ -280,7 +285,7 @@ export function OnboardingWizard() {
                   ) : (
                     <Icon className="h-4 w-4 shrink-0" />
                   )}
-                  <span>{entry.label}{done ? <span className="sr-only">, completed</span> : null}</span>
+                  <span>{t(entry.label)}{done ? <span className="sr-only">{t(", completed")}</span> : null}</span>
                 </div>
               </li>
             );
@@ -290,7 +295,7 @@ export function OnboardingWizard() {
 
       <form
         className="card auth-form mt-6 space-y-6 p-6 sm:p-8"
-        aria-label="Create your farm account"
+        aria-label={t("Create your farm account")}
         aria-busy={submitting}
         onSubmit={(event) => {
           event.preventDefault();
@@ -298,20 +303,22 @@ export function OnboardingWizard() {
           else void finish();
         }}
       >
-        {error ? <Callout tone="danger">{error}</Callout> : null}
+        {error ? <Callout tone="danger">{t(error)}</Callout> : null}
 
         <div key={step}>
         {step === 0 ? (
           <div className="space-y-5">
             <div>
-              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">What is your name?</h1>
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">{t("What is your name?")}</h1>
               <p className="muted mt-3 text-sm leading-relaxed">
-                We use it to greet you and as your login name. Your PIN is created in the last step.
+                {t(
+                  "We use it to greet you and as your login name. Your PIN is created in the last step.",
+                )}
               </p>
             </div>
             <label className="block">
               <span className="mb-2 block text-sm font-medium text-ink">
-                Farmer name
+                {t("Farmer name")}
               </span>
               <div className="relative mt-1.5">
                 <UserRound className="pointer-events-none absolute left-3.5 top-1/2 h-4.5 w-4.5 -translate-y-1/2 text-accent-500" />
@@ -319,14 +326,14 @@ export function OnboardingWizard() {
                   className="input pl-11"
                   value={name}
                   onChange={(event) => setName(event.target.value)}
-                  placeholder="e.g. Ramesh Patel"
+                  placeholder={t("e.g. Ramesh Patel")}
                   maxLength={60}
                   autoFocus
                 />
               </div>
             </label>
             <p className="muted text-xs">
-              Use your real name — it will appear on the dashboard.
+              {t("Use your real name — it will appear on the dashboard.")}
             </p>
           </div>
         ) : null}
@@ -335,24 +342,27 @@ export function OnboardingWizard() {
           <div className="space-y-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Select your farm</h1>
+                <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">{t("Select your farm")}</h1>
                 <p className="muted mt-3 text-sm leading-relaxed">
-                  Pick a farm that is waiting to be claimed, or draw your own boundary on the map.
+                  {t(
+                    "Pick a farm that is waiting to be claimed, or draw your own boundary on the map.",
+                  )}
                 </p>
               </div>
               <Button variant="secondary" onClick={() => setShowMap((current) => !current)}>
                 <PencilRuler className="h-4 w-4" />
-                {showMap ? "Hide map" : "Draw new farm"}
+                {showMap ? t("Hide map") : t("Draw new farm")}
               </Button>
             </div>
 
             {farmsLoading ? (
               <div className="h-20 animate-pulse-soft rounded-2xl bg-paper-deep" />
             ) : farms.length === 0 ? (
-              <Callout tone="info" title="No farm available to select">
+              <Callout tone="info" title={t("No farm available to select")}>
                 <p>
-                  Draw your field boundary on the satellite map below. Tap at least 3 corners
-                  around the field, then save. Its centre is used for real weather.
+                  {t(
+                    "Draw your field boundary on the satellite map below. Tap at least 3 corners around the field, then save. Its centre is used for real weather.",
+                  )}
                 </p>
               </Callout>
             ) : (
@@ -374,8 +384,8 @@ export function OnboardingWizard() {
                         </p>
                         <p className="muted text-xs">
                           {farm.areaAcres === null
-                            ? "Area not recorded"
-                            : `${farm.areaAcres.toFixed(2)} acres`}
+                            ? t("Area not recorded")
+                            : t("{value} acres", { value: farm.areaAcres.toFixed(2) })}
                         </p>
                       </div>
                       <span
@@ -394,9 +404,9 @@ export function OnboardingWizard() {
               </div>
             )}
 
-            {showMap || farms.length === 0 ? (
+            {showMap ? (
               <div className="space-y-2 border-t border-[var(--border)] pt-4">
-                <p className="text-sm font-semibold">Draw your farmland</p>
+                <p className="text-sm font-semibold">{t("Draw your farmland")}</p>
                 <MapDrawer
                   farms={[]}
                   onSaved={async (farm) => {
@@ -413,17 +423,18 @@ export function OnboardingWizard() {
         {step === 2 ? (
           <div className="space-y-5">
             <div>
-              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Select your crop</h1>
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">{t("Select your crop")}</h1>
               <p className="muted mt-3 text-sm leading-relaxed">
-                Tell us what is growing and which day it is on. The guide uses this plus your
-                farm&apos;s live forecast.
+                {t(
+                  "Tell us what is growing and which day it is on. The guide uses this plus your farm's live forecast.",
+                )}
               </p>
             </div>
 
             <div className="grid gap-3 sm:grid-cols-2">
               <label className="block">
                 <span className="text-sm font-medium text-ink">
-                  Crop
+                  {t("Crop")}
                 </span>
                 <select
                   className="select mt-1.5"
@@ -432,7 +443,7 @@ export function OnboardingWizard() {
                 >
                   {CROP_OPTIONS.map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {t(option)}
                     </option>
                   ))}
                 </select>
@@ -440,7 +451,7 @@ export function OnboardingWizard() {
 
               <label className="block">
                 <span className="text-sm font-medium text-ink">
-                  Crop day (days since sowing)
+                  {t("Crop day (days since sowing)")}
                 </span>
                 <div className="relative mt-1.5">
                   <CalendarDays className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
@@ -452,7 +463,7 @@ export function OnboardingWizard() {
                     inputMode="numeric"
                     value={cropDays}
                     onChange={(event) => setCropDays(event.target.value)}
-                    placeholder="e.g. 35"
+                    placeholder={t("e.g. 35")}
                   />
                 </div>
               </label>
@@ -460,7 +471,7 @@ export function OnboardingWizard() {
 
             <label className="block sm:max-w-xs">
               <span className="text-sm font-medium text-ink">
-                Expected crop duration (days)
+                {t("Expected crop duration (days)")}
               </span>
               <input
                 className="input mt-1.5"
@@ -475,8 +486,10 @@ export function OnboardingWizard() {
                 }}
               />
               <span className="muted mt-1 block text-xs">
-                Pre-filled with the typical duration for {cropName}. Adjust it if your variety
-                is different.
+                {t(
+                  "Pre-filled with the typical duration for {crop}. Adjust it if your variety is different.",
+                  { crop: t(cropName) },
+                )}
               </span>
             </label>
 
@@ -484,11 +497,15 @@ export function OnboardingWizard() {
               <div className="rounded-xl bg-leaf-100 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <p className="text-sm font-semibold">
-                    {preview.emoji} Day {preview.ageDays} · {preview.stage.name}
+                    {preview.emoji}{" "}
+                    {t("Day {day} · {stage}", {
+                      day: preview.ageDays,
+                      stage: t(preview.stage.name),
+                    })}
                   </p>
                   <span className="chip chip-lime">{preview.progress}%</span>
                 </div>
-                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-card" role="progressbar" aria-label="Crop season progress" aria-valuenow={preview.progress} aria-valuemin={0} aria-valuemax={100}>
+                <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-card" role="progressbar" aria-label={t("Crop season progress")} aria-valuenow={preview.progress} aria-valuemin={0} aria-valuemax={100}>
                   <div
                     className="progress-fill h-full rounded-full bg-leaf-600"
                     style={{ transform: `scaleX(${preview.progress / 100})` }}
@@ -496,7 +513,10 @@ export function OnboardingWizard() {
                   />
                 </div>
                 <p className="muted mt-3 text-xs leading-relaxed">
-                  {preview.stage.focus} Harvest window in about {preview.daysToHarvest} days.
+                  {t("{focus} Harvest window in about {days} days.", {
+                    focus: t(preview.stage.focus),
+                    days: preview.daysToHarvest,
+                  })}
                 </p>
               </div>
             ) : null}
@@ -506,16 +526,18 @@ export function OnboardingWizard() {
         {step === 3 ? (
           <div className="space-y-5">
             <div>
-              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">Create your PIN</h1>
+              <h1 ref={stepHeadingRef} tabIndex={-1} className="text-2xl font-semibold leading-tight outline-none">{t("Create your PIN")}</h1>
               <p className="muted mt-3 text-sm leading-relaxed">
-                You will sign in with <strong>{name.trim() || "your name"}</strong> and this PIN.
-                Suggested format: name + 1234.
+                {t("You will sign in with {name} and this PIN.", {
+                  name: name.trim() || t("your name"),
+                })}{" "}
+                {t("Suggested format: name + 1234.")}
               </p>
             </div>
 
             <label className="block">
               <span className="text-sm font-medium text-ink">
-                Login PIN
+                {t("Login PIN")}
               </span>
               <div className="relative mt-1.5">
                 <KeyRound className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--muted)]" />
@@ -532,33 +554,37 @@ export function OnboardingWizard() {
                 />
               </div>
               <span id="pin-help" className="muted mt-1.5 block text-xs">
-                4–32 letters or numbers. Example: <code className="font-mono">{suggestedPin}</code>.
-                Keep it somewhere safe — you need it every time you sign in.
+                {t(
+                  "4–32 letters or numbers. Example: {pin}. Keep it somewhere safe — you need it every time you sign in.",
+                  { pin: suggestedPin },
+                )}
               </span>
             </label>
 
             <div className="rounded-xl bg-[var(--card-muted)] p-4 text-sm">
-              <p className="font-semibold">Ready to create your account</p>
+              <p className="font-semibold">{t("Ready to create your account")}</p>
               <dl className="mt-4 grid gap-4 text-xs sm:grid-cols-2">
                 <div>
-                  <dt className="muted">Name</dt>
+                  <dt className="muted">{t("Name")}</dt>
                   <dd className="font-semibold">{name.trim() || "—"}</dd>
                 </div>
                 <div>
-                  <dt className="muted">Farm</dt>
+                  <dt className="muted">{t("Farm")}</dt>
                   <dd className="font-semibold">
                     {farms.find((farm) => farm.id === farmId)?.name ?? "—"}
                   </dd>
                 </div>
                 <div>
-                  <dt className="muted">Crop</dt>
-                  <dd className="font-semibold">{cropName}</dd>
+                  <dt className="muted">{t("Crop")}</dt>
+                  <dd className="font-semibold">{t(cropName)}</dd>
                 </div>
                 <div>
-                  <dt className="muted">Crop day</dt>
+                  <dt className="muted">{t("Crop day")}</dt>
                   <dd className="font-semibold">
-                    Day {Number.isFinite(cropDayNumber) ? Math.round(cropDayNumber) : "—"}
-                    {preview ? ` of ${preview.durationDays}` : ""}
+                    {t("Day {day}", {
+                      day: Number.isFinite(cropDayNumber) ? Math.round(cropDayNumber) : "—",
+                    })}
+                    {preview ? ` ${t("of {total}", { total: preview.durationDays })}` : ""}
                   </dd>
                 </div>
               </dl>
@@ -572,7 +598,7 @@ export function OnboardingWizard() {
           {step > 0 ? (
             <Button variant="ghost" onClick={back} disabled={submitting}>
               <ArrowLeft className="h-4 w-4" />
-              Back
+              {t("Back")}
             </Button>
           ) : (
             <span />
@@ -580,13 +606,13 @@ export function OnboardingWizard() {
 
           {step < STEPS.length - 1 ? (
             <Button type="submit">
-              Continue
+              {t("Continue")}
               <ArrowRight className="h-4 w-4" />
             </Button>
           ) : (
             <Button type="submit" loading={submitting}>
               <Check className="h-4 w-4" />
-              Create account
+              {t("Create account")}
             </Button>
           )}
         </div>

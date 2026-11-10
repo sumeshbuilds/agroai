@@ -49,6 +49,7 @@ import {
 } from "@/lib/camera";
 import { formatRelative } from "@/lib/format";
 import { useClientValue } from "@/lib/hooks/use-client-value";
+import { useI18n } from "@/lib/i18n";
 import { CAMERA_WATCH_RADIUS_KM } from "@/lib/map";
 import type { WeatherSnapshot } from "@/lib/weather";
 
@@ -61,6 +62,7 @@ const POLL_MS_NORMAL = 1_000;
 const POLL_MS_SLOW = 2_500;
 
 export function WatchView() {
+  const { t } = useI18n();
   const origin = useClientValue(() => window.location.origin, "");
   const hostname = useClientValue(() => window.location.hostname, "");
   const protocol = useClientValue(() => window.location.protocol, "http:");
@@ -316,7 +318,7 @@ export function WatchView() {
 
   const removeSession = async () => {
     if (!selectedSession) return;
-    if (!window.confirm(`Delete “${selectedSession.name}” and its detection history?`)) {
+    if (!window.confirm(t("Delete “{name}” and its detection history?", { name: selectedSession.name }))) {
       return;
     }
     setBusy("delete");
@@ -358,19 +360,21 @@ export function WatchView() {
       : null;
 
   const liveChipLabel = selectedSession?.isLive
-    ? "Live camera"
+    ? t("Live camera")
     : selectedSession?.status === "live"
-      ? "Waiting for frames"
+      ? t("Waiting for frames")
       : selectedSession?.status === "ended"
-        ? "Stream ended"
-        : "No live camera";
+        ? t("Stream ended")
+        : t("No live camera");
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
       <div className="mb-6">
         <SectionHeading
-          title="Animal & people watch"
-          subtitle="Your phone is the camera. It watches for people and animals on-device and streams what it sees here — satellites map the land, cameras watch what moves on it."
+          title={t("Animal & people watch")}
+          subtitle={t(
+            "Your phone is the camera. It watches for people and animals on-device and streams what it sees here — satellites map the land, cameras watch what moves on it.",
+          )}
           icon={<Radar aria-hidden className="h-5 w-5" />}
           action={<>
           <span
@@ -397,11 +401,11 @@ export function WatchView() {
             loading={refreshing}
           >
             <RefreshCw className="h-4 w-4" />
-            Refresh
+            {t("Refresh")}
           </Button>
           <Button onClick={createSession} loading={creating}>
             <Plus className="h-4 w-4" />
-            Pair a phone
+            {t("Pair a phone")}
           </Button>
           </>}
         />
@@ -409,10 +413,10 @@ export function WatchView() {
 
       <SetupNotice showDatabase={needsSetup} />
 
-      {notice ? <Callout tone="success" className="mb-3">{notice}</Callout> : null}
-      {error ? <Callout tone="danger" className="mb-3">{error}</Callout> : null}
+      {notice ? <Callout tone="success" className="mb-3">{t(notice)}</Callout> : null}
+      {error ? <Callout tone="danger" className="mb-3">{t(error)}</Callout> : null}
 
-      <CameraAlarmBanner className="mb-6" intervalMs={4_000} />
+      <CameraAlarmBanner intervalMs={4_000} />
 
       {sessionsLoading && sessions.length === 0 ? (
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
@@ -422,18 +426,20 @@ export function WatchView() {
       ) : sessions.length === 0 ? (
         <EmptyState
           icon={<Camera className="h-7 w-7" />}
-          title="Pair your phone as the first field camera"
-          description="Tap “Pair a phone”, scan the QR code on your mobile, then point the rear camera at the demo field. People and animals show up here with live boxes and movement direction."
+          title={t("Pair your phone as the first field camera")}
+          description={t(
+            "Tap “Pair a phone”, scan the QR code on your mobile, then point the rear camera at the demo field. People and animals show up here with live boxes and movement direction.",
+          )}
           action={
             <Button onClick={createSession} loading={creating}>
               <Smartphone className="h-4 w-4" />
-              Pair a phone camera
+              {t("Pair a phone camera")}
             </Button>
           }
         />
       ) : (
         <>
-          <nav aria-label="Camera sessions" className="mb-5 flex flex-wrap gap-2">
+          <nav aria-label={t("Camera sessions")} className="mb-5 flex flex-wrap gap-2">
             {sessions.map((session) => (
               <button
                 key={session.id}
@@ -456,7 +462,7 @@ export function WatchView() {
                 <span className="truncate">{session.name}</span>
                 {session.isLive ? (
                   <span className="text-[0.625rem] font-semibold">
-                    LIVE
+                    {t("LIVE")}
                   </span>
                 ) : null}
               </button>
@@ -465,7 +471,7 @@ export function WatchView() {
 
           <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
             <div className="min-w-0 space-y-5">
-              {detailError ? <Callout tone="danger">{detailError}</Callout> : null}
+              {detailError ? <Callout tone="danger">{t(detailError)}</Callout> : null}
 
               <LivePlayer
                 session={selectedSession}
@@ -473,33 +479,33 @@ export function WatchView() {
                 frameAge={frameAge}
               />
 
-              <section aria-label="Camera statistics" className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <section aria-label={t("Camera statistics")} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
                 <StatTile
                   icon={<Users className="h-4 w-4" />}
-                  label="People"
+                  label={t("People")}
                   value={String(stats.persons)}
                   accent={stats.persons > 0}
                 />
                 <StatTile
                   icon={<PawPrint className="h-4 w-4" />}
-                  label="Animals"
+                  label={t("Animals")}
                   value={String(stats.animals)}
                   accent={stats.animals > 0}
                 />
                 <StatTile
                   icon={<Gauge className="h-4 w-4" />}
-                  label="Motion"
+                  label={t("Motion")}
                   value={`${Math.round((selectedSession?.motion ?? 0) * 1000) / 10}%`}
                 />
                 <StatTile
                   icon={<Cpu className="h-4 w-4" />}
-                  label="On-device AI"
+                  label={t("On-device AI")}
                   value={
                     selectedSession?.aiEnabled
-                      ? "Active"
+                      ? t("Active")
                       : selectedSession?.status === "ended"
-                        ? "Stopped"
-                        : "Motion"
+                        ? t("Stopped")
+                        : t("Motion")
                   }
                 />
               </section>
@@ -509,25 +515,25 @@ export function WatchView() {
                   <div>
                     <h2 className="flex items-center gap-2 text-base font-semibold">
                       <Activity className="h-4 w-4 text-accent-600" />
-                      Detection feed
+                      {t("Detection feed")}
                     </h2>
                     <p className="muted mt-1.5 text-xs leading-relaxed">
-                      Confirmed human and animal tracks from the live camera
+                      {t("Confirmed human and animal tracks from the live camera")}
                     </p>
                   </div>
                   <span className="chip chip-violet">
-                    {selectedSession?.totalDetections ?? 0} logged
+                    {t("{count} logged", { count: selectedSession?.totalDetections ?? 0 })}
                   </span>
                 </header>
 
                 {!activeDetail || activeDetail.detections.length === 0 ? (
                   <div className="flex flex-col items-center gap-3 px-5 py-12 text-center">
                     <Eye className="h-6 w-6 text-[var(--color-ink-soft)]" />
-                    <p className="text-sm font-semibold">No tracks logged yet</p>
+                    <p className="text-sm font-semibold">{t("No tracks logged yet")}</p>
                     <p className="muted max-w-sm text-xs leading-relaxed">
-                      Walk a person or animal through the camera frame. Each new
-                      track appears here once, with its confidence and movement
-                      direction.
+                      {t(
+                        "Walk a person or animal through the camera frame. Each new track appears here once, with its confidence and movement direction.",
+                      )}
                     </p>
                   </div>
                 ) : (
@@ -546,7 +552,7 @@ export function WatchView() {
                           </span>
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-semibold">
-                              {detection.label}
+                              {t(detection.label)}
                               {detection.confidence ? (
                                 <span className="muted ml-2 text-xs font-medium tabular-nums">
                                   {Math.round(detection.confidence * 100)}%
@@ -554,23 +560,23 @@ export function WatchView() {
                               ) : null}
                             </p>
                             <p className="muted text-xs">
-                              {detection.direction ?? "in frame"} ·{" "}
-                              {formatRelative(detection.createdAt)}
+                              {t(detection.direction ?? "in frame")} ·{" "}
+                              {t(formatRelative(detection.createdAt))}
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
                             {detection.category === "person" ? (
-                              <span className="chip chip-warn">Human</span>
+                              <span className="chip chip-warn">{t("Human")}</span>
                             ) : (
-                              <span className="chip chip-danger">Animal</span>
+                              <span className="chip chip-danger">{t("Animal")}</span>
                             )}
                             {detection.verified ? (
                               <span
                                 className="chip chip-brand"
-                                title="Confirmed by Groq vision"
+                                title={t("Confirmed by Groq vision")}
                               >
                                 <Sparkles className="h-3 w-3" />
-                                AI
+                                {t("AI")}
                               </span>
                             ) : null}
                           </div>
@@ -586,11 +592,11 @@ export function WatchView() {
               <section className="card overflow-hidden">
                 <header className="flex flex-wrap items-center gap-2 border-b border-[var(--border)] p-5">
                   <Smartphone className="h-4 w-4 text-accent-600" />
-                  <h2 className="text-base font-semibold">Phone pairing</h2>
+                  <h2 className="text-base font-semibold">{t("Phone pairing")}</h2>
                   {selectedSession?.isLive ? (
                     <span className="chip chip-brand ml-auto">
                       <Signal className="h-3 w-3" />
-                      connected
+                      {t("connected")}
                     </span>
                   ) : null}
                 </header>
@@ -615,17 +621,17 @@ export function WatchView() {
                         <div className="min-w-0 flex-1">
                           <p className="break-words text-sm font-semibold">{selectedSession.name}</p>
                           <p className="muted mt-2 text-xs leading-relaxed">
-                            Scan with the phone camera, allow camera + location,
-                            then tap <strong>Start camera stream</strong>.
+                            {t("Scan with the phone camera, allow camera + location, then tap")}{" "}
+                            <strong>{t("Start camera stream")}</strong>.
                           </p>
                           <div className="mt-2 flex flex-wrap gap-1.5">
                             <span className="chip max-w-full whitespace-normal break-words bg-[var(--card-muted)] text-[var(--muted)]">
-                              {selectedSession.deviceLabel ?? "Waiting for phone"}
+                              {selectedSession.deviceLabel ?? t("Waiting for phone")}
                             </span>
                             {selectedSession.lat !== null ? (
                               <span className="chip chip-violet">
                                 <MapPin className="h-3 w-3" />
-                                GPS linked
+                                {t("GPS linked")}
                               </span>
                             ) : null}
                           </div>
@@ -634,17 +640,17 @@ export function WatchView() {
 
                       <div className="rounded-xl bg-[var(--card-muted)] p-3">
                         <p className="muted mb-1.5 text-xs font-medium">
-                          Camera link
+                          {t("Camera link")}
                         </p>
                         <p className="break-all font-mono text-[11px] leading-relaxed">
-                          {phoneUrl || "Getting your network address…"}
+                          {phoneUrl || t("Getting your network address…")}
                         </p>
                       </div>
 
                       <div className="flex flex-wrap gap-2">
                         <Button variant="secondary" onClick={() => void copyLink()} disabled={!phoneUrl}>
                           {copied ? <Check className="h-4 w-4" /> : <Clipboard className="h-4 w-4" />}
-                          {copied ? "Copied" : "Copy link"}
+                          {copied ? t("Copied") : t("Copy link")}
                         </Button>
                         {phoneUrl ? (
                           <a
@@ -654,7 +660,7 @@ export function WatchView() {
                             className="btn btn-secondary"
                           >
                             <ExternalLink className="h-4 w-4" />
-                            Open
+                            {t("Open")}
                           </a>
                         ) : null}
                       </div>
@@ -662,27 +668,27 @@ export function WatchView() {
                       {!phoneIsSecure ? (
                         <details className="rounded-xl bg-warn-100 px-3.5 py-2 text-xs text-warn-700">
                           <summary className="min-h-11 content-center font-semibold leading-relaxed">
-                            Phone camera needs HTTPS — tap for setup
+                            {t("Phone camera needs HTTPS — tap for setup")}
                           </summary>
                           <ol className="mb-2 mt-2 list-decimal space-y-2 break-words pl-4 leading-relaxed [overflow-wrap:anywhere]">
                             <li>
-                              Best for the exhibition: deploy to Vercel or use a
-                              Cloudflare / ngrok HTTPS tunnel.
+                              {t(
+                                "Best for the exhibition: deploy to Vercel or use a Cloudflare / ngrok HTTPS tunnel.",
+                              )}
                             </li>
                             <li>
-                              Android Chrome workaround: open{" "}
-                              <code className="font-mono">
-                                chrome://flags/#unsafely-treat-insecure-origin-as-secure
-                              </code>
-                              , add{" "}
-                              <code className="font-mono">
-                                {phoneUrl.split("/camera")[0]}
-                              </code>
-                              , enable, relaunch Chrome.
+                              {t(
+                                "Android Chrome workaround: open {flag}, add {origin}, enable, relaunch Chrome.",
+                                {
+                                  flag: "chrome://flags/#unsafely-treat-insecure-origin-as-secure",
+                                  origin: phoneUrl.split("/camera")[0],
+                                },
+                              )}
                             </li>
                             <li>
-                              Or run <code className="font-mono">npm run dev:https</code>{" "}
-                              and accept the certificate on the phone.
+                              {t("Or run {command} and accept the certificate on the phone.", {
+                                command: "npm run dev:https",
+                              })}
                             </li>
                           </ol>
                         </details>
@@ -695,7 +701,7 @@ export function WatchView() {
                             loading={busy === "live"}
                           >
                             <Play className="h-4 w-4" />
-                            Restart stream
+                            {t("Restart stream")}
                           </Button>
                         ) : (
                           <Button
@@ -704,7 +710,7 @@ export function WatchView() {
                             loading={busy === "ended"}
                           >
                             <CameraOff className="h-4 w-4" />
-                            Stop stream
+                            {t("Stop stream")}
                           </Button>
                         )}
                         <Button
@@ -713,12 +719,12 @@ export function WatchView() {
                           loading={busy === "delete"}
                         >
                           <Trash2 className="h-4 w-4" />
-                          Delete
+                          {t("Delete")}
                         </Button>
                       </div>
                     </>
                   ) : (
-                    <p className="muted text-sm">Select or create a camera first.</p>
+                    <p className="muted text-sm">{t("Select or create a camera first.")}</p>
                   )}
                 </div>
               </section>
@@ -727,10 +733,10 @@ export function WatchView() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <h2 className="flex items-center gap-2 text-base font-semibold">
                     <MapPin className="h-4 w-4 text-leaf-600" />
-                    Field context
+                    {t("Field context")}
                   </h2>
                   <Link href="/map" className="inline-flex min-h-11 items-center text-xs font-medium text-accent-700 underline-offset-4 hover:underline">
-                    Satellite map
+                    {t("Satellite map")}
                   </Link>
                 </div>
 
@@ -738,57 +744,61 @@ export function WatchView() {
                   <div className="mt-3 border-b border-[var(--border)] pb-4">
                     <p className="text-sm font-semibold">{selectedSession.farm.name}</p>
                     <p className="muted mt-1.5 text-xs leading-relaxed">
-                      Camera is {formatDistance(selectedSession.farm.distanceKm)} to
-                      the {selectedSession.farm.direction} of this field.
+                      {t("Camera is {distance} to the {direction} of this field.", {
+                        distance: formatDistance(selectedSession.farm.distanceKm, t),
+                        direction: t(selectedSession.farm.direction),
+                      })}
                     </p>
                     {selectedSession.farm.distanceKm > CAMERA_WATCH_RADIUS_KM ? (
                       <p className="mt-1 text-xs font-semibold text-mustard-600">
-                        Camera is outside the {CAMERA_WATCH_RADIUS_KM} km field
-                        watch radius.
+                        {t("Camera is outside the {radius} km field watch radius.", {
+                          radius: CAMERA_WATCH_RADIUS_KM,
+                        })}
                       </p>
                     ) : null}
                   </div>
                 ) : (
                   <p className="muted mt-3 text-xs leading-relaxed">
-                    Allow location on the phone to link this camera to your
-                    satellite-mapped field and show hyper-local weather.
+                    {t(
+                      "Allow location on the phone to link this camera to your satellite-mapped field and show hyper-local weather.",
+                    )}
                   </p>
                 )}
 
                 <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1">
                   <ContextRow
                     icon={<Ruler className="h-3.5 w-3.5" />}
-                    label="Live camera"
-                    value={selectedSession?.isLive ? "Streaming" : "Offline"}
+                    label={t("Live camera")}
+                    value={selectedSession?.isLive ? t("Streaming") : t("Offline")}
                   />
                   <ContextRow
                     icon={<Signal className="h-3.5 w-3.5" />}
-                    label="Frame latency"
+                    label={t("Frame latency")}
                     value={frameAge === null ? "—" : `${frameAge}s`}
                   />
                   <ContextRow
                     icon={<MapPin className="h-3.5 w-3.5" />}
-                    label="Phone GPS"
+                    label={t("Phone GPS")}
                     value={
                       selectedSession?.lat !== null && selectedSession?.lat !== undefined
                         ? `${selectedSession.lat.toFixed(3)}, ${selectedSession.lng?.toFixed(3)}`
-                        : "Not shared"
+                        : t("Not shared")
                     }
                   />
                   <ContextRow
                     icon={<Bot className="h-3.5 w-3.5" />}
-                    label="Detector"
+                    label={t("Detector")}
                     value={
                       selectedSession?.aiEnabled
-                        ? "On-device + Groq"
-                        : "Motion assist"
+                        ? t("On-device + Groq")
+                        : t("Motion assist")
                     }
                   />
                 </div>
 
                 <div className="mt-3 border-t border-[var(--border)] pt-3">
                   <p className="muted text-xs font-medium">
-                    Weather at the camera
+                    {t("Weather at the camera")}
                   </p>
                   {weather ? (
                     <div className="mt-1.5 flex flex-wrap items-end gap-x-4 gap-y-1">
@@ -796,22 +806,27 @@ export function WatchView() {
                         {weather.current.temperature?.toFixed(0) ?? "—"}°C
                       </p>
                       <p className="muted text-xs">
-                        Rain {weather.current.precipitation ?? 0} mm · Wind{" "}
-                        {weather.current.windSpeed ?? 0} km/h
+                        {t("Rain {rain} mm · Wind {wind} km/h", {
+                          rain: weather.current.precipitation ?? 0,
+                          wind: weather.current.windSpeed ?? 0,
+                        })}
                       </p>
                       <p className="muted text-xs">
-                        Soil{" "}
-                        {weather.current.soilMoisture === null
-                          ? "—"
-                          : `${(weather.current.soilMoisture * 100).toFixed(0)}%`}
+                        {t("Soil {value}", {
+                          value:
+                            weather.current.soilMoisture === null
+                              ? "—"
+                              : `${(weather.current.soilMoisture * 100).toFixed(0)}%`,
+                        })}
                       </p>
                     </div>
                   ) : (
                     <p className="muted mt-1 text-xs">
-                      {weatherError ??
-                        (selectedSession?.lat !== null && selectedSession?.lat !== undefined
-                          ? "Loading live Open-Meteo weather…"
-                          : "Waiting for phone location.")}
+                      {weatherError
+                        ? t(weatherError)
+                        : selectedSession?.lat !== null && selectedSession?.lat !== undefined
+                          ? t("Loading live Open-Meteo weather…")
+                          : t("Waiting for phone location.")}
                     </p>
                   )}
                 </div>
@@ -820,7 +835,7 @@ export function WatchView() {
               <section className="card p-5">
                 <h2 className="flex items-center gap-2 text-base font-semibold">
                   <Sparkles className="h-4 w-4 text-accent-600" />
-                  Demo in 4 steps
+                  {t("Demo in 4 steps")}
                 </h2>
                 <ol className="mt-4 space-y-3">
                   {[
@@ -833,14 +848,15 @@ export function WatchView() {
                       <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-leaf-100 text-[10px] font-semibold text-leaf-700">
                         {index + 1}
                       </span>
-                      <span>{step}</span>
+                      <span>{t(step)}</span>
                     </li>
                   ))}
                 </ol>
                 <p className="muted mt-3 flex items-start gap-1.5 text-[11px] leading-relaxed">
                   <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  Synthetic intrusion simulation was removed. Every alert on this
-                  page comes from a real camera track.
+                  {t(
+                    "Synthetic intrusion simulation was removed. Every alert on this page comes from a real camera track.",
+                  )}
                 </p>
               </section>
             </aside>
@@ -860,8 +876,9 @@ function LivePlayer({
   detections: FrameDetection[];
   frameAge: number | null;
 }) {
+  const { t } = useI18n();
   return (
-    <section className="camera-surface relative overflow-hidden rounded-2xl bg-slate-950 shadow-[var(--shadow-card)]" aria-label="Camera preview">
+    <section className="camera-surface relative overflow-hidden rounded-2xl bg-slate-950 shadow-[var(--shadow-card)]" aria-label={t("Camera preview")}>
       <div
         className="relative aspect-[4/3] w-full sm:aspect-video"
         style={{
@@ -875,7 +892,7 @@ function LivePlayer({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={session.frameUrl}
-            alt={`Live frame from ${session.name}`}
+            alt={t("Live frame from {name}", { name: session.name })}
             className="absolute inset-0 h-full w-full object-contain"
           />
         ) : (
@@ -884,11 +901,12 @@ function LivePlayer({
               <Camera aria-hidden className="h-6 w-6" />
             </span>
             <p className="text-sm font-semibold text-slate-100">
-              Waiting for the phone camera
+              {t("Waiting for the phone camera")}
             </p>
             <p className="max-w-xs text-xs leading-relaxed text-slate-400">
-              Scan the QR code, tap Start camera stream, then point the phone at
-              the field.
+              {t(
+                "Scan the QR code, tap Start camera stream, then point the phone at the field.",
+              )}
             </p>
           </div>
         )}
@@ -912,7 +930,7 @@ function LivePlayer({
               <span
                 className={`absolute -top-5 left-[-2px] inline-flex max-w-[160px] items-center gap-1 truncate rounded-t-md px-1.5 py-0.5 text-[10px] font-extrabold leading-none ${style.text}`}
               >
-                {detection.emoji} {detection.label}
+                {detection.emoji} {t(detection.label)}
                 <span className="opacity-70">
                   {Math.round(detection.confidence * 100)}%
                 </span>
@@ -969,17 +987,17 @@ function LivePlayer({
                   : "h-1.5 w-1.5 rounded-full bg-slate-400"
               }
             />
-            {session?.isLive ? "Live" : "Offline"}
+            {session?.isLive ? t("Live") : t("Offline")}
           </span>
           {session?.aiEnabled ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-200 backdrop-blur">
               <Cpu className="h-3 w-3" />
-              On-device AI
+              {t("On-device AI")}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/30 bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-200 backdrop-blur">
               <Activity className="h-3 w-3" />
-              Motion mode
+              {t("Motion mode")}
             </span>
           )}
         </div>
@@ -989,7 +1007,7 @@ function LivePlayer({
             {detections.length === 0 ? (
               <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/50 px-2.5 py-1 text-[10px] font-semibold text-white/70 backdrop-blur">
                 <CircleDot className="h-3 w-3" />
-                No objects in frame
+                {t("No objects in frame")}
               </span>
             ) : (
               detections.slice(0, 4).map((detection) => (
@@ -997,7 +1015,7 @@ function LivePlayer({
                   key={detection.trackId}
                   className="inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur"
                 >
-                  {detection.emoji} {detection.label}
+                  {detection.emoji} {t(detection.label)}
                   <span className="text-white/60">
                     {Math.round(detection.confidence * 100)}%
                   </span>
@@ -1007,7 +1025,9 @@ function LivePlayer({
           </div>
           <span className="inline-flex items-center gap-1.5 rounded-full bg-black/55 px-2.5 py-1 text-[10px] font-bold text-white/80 backdrop-blur">
             <Link2 className="h-3 w-3" />
-            {frameAge === null ? "no frame yet" : `${frameAge}s frame age`}
+            {frameAge === null
+              ? t("no frame yet")
+              : t("{seconds}s frame age", { seconds: frameAge })}
           </span>
         </div>
 
@@ -1016,7 +1036,7 @@ function LivePlayer({
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-900 px-4 py-3.5">
         <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
           <Camera className="h-3.5 w-3.5 text-leaf-300" />
-          {session?.name ?? "Field camera"}
+          {session?.name ?? t("Field camera")}
           {session?.deviceLabel ? (
             <span className="font-normal text-slate-400">
               · {session.deviceLabel}
@@ -1027,12 +1047,14 @@ function LivePlayer({
           {session?.lastSeenAt ? (
             <>
               <Radio className="h-3 w-3" />
-              Last frame {formatRelative(session.lastSeenAt)}
+              {t("Last frame {time}", {
+                time: t(formatRelative(session.lastSeenAt)),
+              })}
             </>
           ) : (
             <>
               <WifiOff className="h-3 w-3" />
-              No frames received
+              {t("No frames received")}
             </>
           )}
         </p>
@@ -1089,9 +1111,9 @@ function ContextRow({
   );
 }
 
-function formatDistance(km: number): string {
-  if (km < 1) return `${Math.round(km * 1000)} m`;
-  return `${km.toFixed(1)} km`;
+function formatDistance(km: number, t: (text: string) => string): string {
+  if (km < 1) return `${Math.round(km * 1000)} ${t("m")}`;
+  return `${km.toFixed(1)} ${t("km")}`;
 }
 
 function lanScore(address: string): number {

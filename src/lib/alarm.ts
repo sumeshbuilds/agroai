@@ -66,6 +66,93 @@ export function playAlarmTone(category: "person" | "animal" = "animal"): void {
   });
 }
 
+type SirenHandle = {
+  gain: GainNode;
+  nodes: OscillatorNode[];
+};
+
+let siren: SirenHandle | null = null;
+
+/**
+ * Starts a continuous, high-pitched wailing siren. It keeps looping until
+ * `stopAlarmSiren()` is called (dismissing every alarm or muting the sound).
+ * Safe to call repeatedly: only one siren plays at a time.
+ */
+export function startAlarmSiren(category: "person" | "animal" = "person"): boolean {
+  const context = getAudioContext();
+  if (!context) return false;
+
+  void context.resume().catch(() => undefined);
+  if (siren) return true;
+
+  const now = context.currentTime;
+  const isPerson = category === "person";
+  const base = isPerson ? 1_620 : 1_380;
+  const sweep = isPerson ? 460 : 360;
+
+  const gain = context.createGain();
+  gain.gain.setValueAtTime(0.0001, now);
+  gain.gain.exponentialRampToValueAtTime(0.085, now + 0.12);
+  gain.connect(context.destination);
+
+  // Carrier: a shrill, piercing tone that never stops.
+  const carrier = context.createOscillator();
+  carrier.type = "square";
+  carrier.frequency.setValueAtTime(base, now);
+
+  // LFO sweeps the carrier up and down so it wails like a real alarm.
+  const lfo = context.createOscillator();
+  lfo.type = "sine";
+  lfo.frequency.setValueAtTime(1.9, now);
+  const lfoGain = context.createGain();
+  lfoGain.gain.setValueAtTime(sweep, now);
+  lfo.connect(lfoGain).connect(carrier.frequency);
+  carrier.connect(gain);
+
+  carrier.start(now);
+  lfo.start(now);
+
+  siren = { gain, nodes: [carrier, lfo] };
+  return true;
+}
+
+/** Fades out and tears down the looping siren, if one is playing. */
+export function stopAlarmSiren(): void {
+  if (!siren) return;
+  const { gain, nodes } = siren;
+  siren = null;
+
+  const context = getAudioContext();
+  if (!context) return;
+
+  try {
+    const now = context.currentTime;
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.2);
+    nodes.forEach((node) => {
+      try {
+        node.stop(now + 0.25);
+      } catch {
+        // Already stopped.
+      }
+    });
+    window.setTimeout(() => {
+      try {
+        gain.disconnect();
+      } catch {
+        // Already disconnected.
+      }
+    }, 400);
+  } catch {
+    // Best effort; a closed audio context throws on every call.
+  }
+}
+
+export function sirenIsPlaying(): boolean {
+  return siren !== null;
+}
+
 export function notificationSupport(): boolean {
   return typeof window !== "undefined" && "Notification" in window;
 }

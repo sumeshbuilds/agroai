@@ -9,9 +9,11 @@ import { ArrowRight, Eye, EyeOff, KeyRound, TriangleAlert, UserRound } from "luc
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { ApiError, api } from "@/lib/api-client";
+import { useI18n } from "@/lib/i18n";
 
 export function LoginForm() {
   const router = useRouter();
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [pin, setPin] = useState("");
   const [showPin, setShowPin] = useState(false);
@@ -46,13 +48,13 @@ export function LoginForm() {
     <form onSubmit={handleSubmit} className="space-y-5" aria-busy={loading}>
       {error ? (
         <Callout tone="danger" icon={<TriangleAlert className="h-4 w-4" />}>
-          {error}
+          {t(error)}
         </Callout>
       ) : null}
 
       <label className="block">
         <span className="mb-2 block text-sm font-medium">
-          Your name
+          {t("Your name")}
         </span>
         <div className="relative">
           <UserRound
@@ -63,7 +65,7 @@ export function LoginForm() {
             className="input pl-11"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Ramesh Patel"
+            placeholder={t("e.g. Ramesh Patel")}
             autoComplete="username"
             autoFocus
             maxLength={60}
@@ -73,7 +75,7 @@ export function LoginForm() {
 
       <label className="block">
         <span className="mb-2 block text-sm font-medium">
-          PIN
+          {t("PIN")}
         </span>
         <div className="relative">
           <KeyRound
@@ -93,7 +95,7 @@ export function LoginForm() {
             type="button"
             onClick={() => setShowPin((current) => !current)}
             className="icon-btn absolute right-1 top-1/2 -translate-y-1/2 border-transparent bg-transparent text-ink-soft"
-            aria-label={showPin ? "Hide PIN" : "Show PIN"}
+            aria-label={showPin ? t("Hide PIN") : t("Show PIN")}
             aria-pressed={showPin}
           >
             {showPin ? <EyeOff aria-hidden className="h-4 w-4" /> : <Eye aria-hidden className="h-4 w-4" />}
@@ -102,14 +104,14 @@ export function LoginForm() {
       </label>
 
       <Button type="submit" loading={loading} className="min-h-12 w-full">
-        Open my farm
+        {t("Open my farm")}
         <ArrowRight aria-hidden className="h-4 w-4" />
       </Button>
 
       <p className="muted flex flex-col items-center justify-center text-center text-sm font-medium sm:flex-row sm:gap-1">
-        <span>New here?</span>
+        <span>{t("New here?")}</span>
         <Link href="/onboarding" className="inline-flex min-h-11 items-center justify-center whitespace-nowrap font-semibold text-accent-700 underline decoration-accent-300 underline-offset-4 hover:decoration-accent-700">
-          Create your farm account
+          {t("Create your farm account")}
         </Link>
       </p>
     </form>

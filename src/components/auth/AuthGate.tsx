@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Leaf } from "lucide-react";
 
 import { api } from "@/lib/api-client";
+import { useI18n } from "@/lib/i18n";
 import type { FarmerDTO } from "@/lib/types";
 import { SessionProvider } from "./session";
 
@@ -16,6 +17,7 @@ import { SessionProvider } from "./session";
  */
 export function AuthGate({ children }: { children: ReactNode }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [farmer, setFarmer] = useState<FarmerDTO | null | undefined>(undefined);
 
   useEffect(() => {
@@ -47,8 +49,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <Leaf className="h-6 w-6" strokeWidth={2.4} />
         </span>
         <div className="text-center">
-          <p className="text-lg font-semibold">Checking your session…</p>
-          <p className="muted mt-1 text-sm font-medium">One moment while we load your farm.</p>
+          <p className="text-lg font-semibold">{t("Checking your session…")}</p>
+          <p className="muted mt-1 text-sm font-medium">{t("One moment while we load your farm.")}</p>
         </div>
       </div>
     );

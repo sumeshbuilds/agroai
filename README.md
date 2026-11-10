@@ -70,7 +70,7 @@ npm run dev         # http://localhost:3000
    camera at the field.
 4. Walk a person or animal through the frame. The laptop shows the live box,
    label, confidence and movement trail; after a moment the track is confirmed
-   and an alarm appears in the dashboard banner (tap **Siren on** to hear it).
+   and a notification popup appears with a continuous high-pitched siren.
    Vehicles are ignored on purpose.
 
 Phone browsers expose the camera only on **HTTPS** (or `localhost`). For a local

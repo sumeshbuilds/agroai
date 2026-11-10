@@ -515,13 +515,26 @@ function resolveDuration(cropName: string, durationDays?: number | null): number
 function scaledStages(preset: CropPreset, durationDays: number): CropStage[] {
   const presetDuration = preset.durationDays;
   const ratio = durationDays / presetDuration;
+  const lastIndex = preset.stages.length - 1;
+
+  // Scale only the start of each stage, then derive its end from the next
+  // stage's start. Scaling `fromDay` and `toDay` independently can leave gaps
+  // or overlaps (and let a stage run past a shortened crop duration), which
+  // made the guide report the wrong stage for custom durations.
+  const starts = preset.stages.map((entry, index) =>
+    index === 0
+      ? 0
+      : Math.min(durationDays, Math.max(0, Math.round(entry.fromDay * ratio))),
+  );
 
   return preset.stages.map((entry, index) => {
-    const isLast = index === preset.stages.length - 1;
+    const isLast = index === lastIndex;
+    const fromDay = starts[index];
+    const nextStart = isLast ? durationDays + 1 : starts[index + 1];
     return {
       ...entry,
-      fromDay: Math.max(0, Math.round(entry.fromDay * ratio)),
-      toDay: isLast ? durationDays : Math.max(entry.fromDay + 1, Math.round(entry.toDay * ratio)),
+      fromDay,
+      toDay: isLast ? durationDays : Math.max(fromDay, nextStart - 1),
     };
   });
 }

@@ -18,18 +18,21 @@ import {
 
 import type { CameraSessionDTO } from "@/lib/camera";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 import type { CropDTO, FarmDTO, WeeklyReportDTO } from "@/lib/types";
 import type { WeatherSnapshot } from "@/lib/weather";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+type TFn = (text: string, vars?: Record<string, string | number>) => string;
+
 /** "24 Aug 25" — compact stamp like the reference's field card. */
-function dateStamp(iso: string | null): string {
+function dateStamp(iso: string | null, t: TFn): string {
   if (!iso) return "—";
   const date = new Date(iso.length === 10 ? `${iso}T00:00:00` : iso);
   if (Number.isNaN(date.getTime())) return "—";
   const yy = String(date.getFullYear()).slice(-2);
-  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${yy}`;
+  return `${date.getDate()} ${t(MONTHS[date.getMonth()])} ${yy}`;
 }
 
 /** Adds the crop's expected duration (days) to the sowing date. */
@@ -70,6 +73,7 @@ export function AreaPanel({
 }) {
   const [sensorOpen, setSensorOpen] = useState(true);
   const [camerasOpen, setCamerasOpen] = useState(false);
+  const { t } = useI18n();
 
   const crop = crops.find((item) => item.isActive) ?? crops[0] ?? null;
   const progress =
@@ -87,7 +91,7 @@ export function AreaPanel({
 
   return (
     <section
-      aria-label={`Field details for ${farm.name}`}
+      aria-label={t("Field details for {name}", { name: farm.name })}
       className={cn("map-panel flex min-h-0 w-full flex-col overflow-hidden", className)}
     >
       {/* Header */}
@@ -95,10 +99,13 @@ export function AreaPanel({
         <div className="min-w-0 flex-1">
           <h2 className="flex items-center gap-2 text-base font-semibold leading-snug">
             <span className="truncate">
-              Area {index + 1} : {crop ? crop.cropName : farm.name}
+              {t("Area {index} : {name}", {
+                index: index + 1,
+                name: crop ? t(crop.cropName) : farm.name,
+              })}
             </span>
             {progress !== null && progress >= 70 ? (
-              <Star className="h-3.5 w-3.5 shrink-0 fill-warn-500 text-warn-500" aria-label="Late growth stage" />
+              <Star className="h-3.5 w-3.5 shrink-0 fill-warn-500 text-warn-500" aria-label={t("Late growth stage")} />
             ) : null}
           </h2>
           <p className="muted mt-1 text-xs tabular-nums">
@@ -108,7 +115,7 @@ export function AreaPanel({
         <button
           type="button"
           onClick={onClose}
-          aria-label="Hide field details"
+          aria-label={t("Hide field details")}
           className="icon-btn -mr-2 -mt-2 border-transparent bg-transparent text-ink-soft"
         >
           <X className="h-4 w-4" />
@@ -121,27 +128,27 @@ export function AreaPanel({
           <div className="grid grid-cols-2 gap-2">
             <div>
               <p className="muted text-xs font-medium">
-                Planting date
+                {t("Planting date")}
               </p>
               <p className="mt-1 text-sm font-semibold tabular-nums">
-                {crop ? dateStamp(crop.sowingDate) : "—"}
+                {crop ? dateStamp(crop.sowingDate, t) : "—"}
               </p>
             </div>
             <div className="text-right">
               <p className="muted text-xs font-medium">
-                Harvest date
+                {t("Harvest date")}
               </p>
               <p className="mt-1 text-sm font-semibold tabular-nums">
-                {dateStamp(harvestDateFrom(crop))}
+                {dateStamp(harvestDateFrom(crop), t)}
               </p>
             </div>
           </div>
 
           <div className="mt-4">
             <div className="flex items-center justify-between gap-2">
-              <p className="muted text-xs font-medium">Growth stage</p>
+              <p className="muted text-xs font-medium">{t("Growth stage")}</p>
               <p className="text-xs font-semibold">
-                {crop?.growthStage ?? (crop ? "Seedling" : "—")}
+                {crop?.growthStage ? t(crop.growthStage) : crop ? t("Seedling") : "—"}
               </p>
             </div>
             <div
@@ -150,7 +157,7 @@ export function AreaPanel({
               aria-valuenow={progress ?? 0}
               aria-valuemin={0}
               aria-valuemax={100}
-              aria-label="Crop growth progress"
+              aria-label={t("Crop growth progress")}
             >
               <div
                 className="progress-fill h-full rounded-full bg-leaf-500"
@@ -160,11 +167,15 @@ export function AreaPanel({
             </div>
             {crop ? (
               <p className="muted mt-2 text-[0.6875rem] tabular-nums">
-                Day {crop.ageDays}
-                {crop.durationDays ? ` of ${crop.durationDays}` : ""} · from sowing date
+                {crop.durationDays
+                  ? t("Day {day} of {total} · from sowing date", {
+                      day: crop.ageDays,
+                      total: crop.durationDays,
+                    })
+                  : t("Day {day}", { day: crop.ageDays })}
               </p>
             ) : (
-              <p className="muted mt-2 text-xs">No crop recorded on this field</p>
+              <p className="muted mt-2 text-xs">{t("No crop recorded on this field")}</p>
             )}
           </div>
         </div>
@@ -177,7 +188,7 @@ export function AreaPanel({
             aria-expanded={sensorOpen}
             className="flex min-h-11 w-full items-center justify-between gap-2 text-left"
           >
-            <span className="text-sm font-semibold">Sensor read</span>
+            <span className="text-sm font-semibold">{t("Sensor read")}</span>
             {sensorOpen ? (
               <ChevronUp className="h-3.5 w-3.5 text-[var(--color-ink-soft)]" />
             ) : (
@@ -190,7 +201,7 @@ export function AreaPanel({
                 <>
                   <SensorRow
                     icon={<Droplets className="h-3 w-3" />}
-                    label="Humidity"
+                    label={t("Humidity")}
                     value={
                       weather.current.humidity === null
                         ? "—"
@@ -199,7 +210,7 @@ export function AreaPanel({
                   />
                   <SensorRow
                     icon={<Cloud className="h-3 w-3" />}
-                    label="Temperature"
+                    label={t("Temperature")}
                     value={
                       weather.current.temperature === null
                         ? "—"
@@ -208,35 +219,34 @@ export function AreaPanel({
                   />
                   <SensorRow
                     icon={<Droplets className="h-3 w-3" />}
-                    label="Soil moisture"
+                    label={t("Soil moisture")}
                     value={
                       weather.current.soilMoisture === null
                         ? "—"
                         : `${Math.round(weather.current.soilMoisture * 100)}%`
                     }
-                    hint="model estimate"
+                    hint={t("model estimate")}
                   />
                   <SensorRow
                     icon={<Wind className="h-3 w-3" />}
-                    label="Wind"
+                    label={t("Wind")}
                     value={
                       weather.current.windSpeed === null
                         ? "—"
-                        : `${Math.round(weather.current.windSpeed)} km/h`
+                        : `${Math.round(weather.current.windSpeed)} ${t("km/h")}`
                     }
                   />
                 </>
               ) : (
                 <p className="muted pb-1.5 pt-1 text-xs leading-relaxed">
                   {weatherLoading
-                    ? "Reading the live sensor weather…"
-                    : "Live weather unavailable — checking the field's coordinates."}
+                    ? t("Reading the live sensor weather…")
+                    : t("Live weather unavailable — checking the field's coordinates.")}
                 </p>
               )}
               {weather ? (
                 <p className="muted pb-1 pt-2 text-[0.6875rem] leading-relaxed">
-                  Open-Meteo nowcast at the field centre · soil value is a model
-                  estimate, not a probe reading
+                  {t("Open-Meteo nowcast at the field centre · soil value is a model estimate, not a probe reading")}
                 </p>
               ) : null}
             </div>
@@ -252,7 +262,7 @@ export function AreaPanel({
             className="flex min-h-11 w-full items-center justify-between gap-2 text-left"
           >
             <span className="text-sm font-semibold">
-              Camera log {cameras.length > 0 ? `(${cameras.length})` : ""}
+              {t("Camera log {count}", { count: cameras.length })}
             </span>
             {camerasOpen ? (
               <ChevronUp className="h-3.5 w-3.5 text-[var(--color-ink-soft)]" />
@@ -266,10 +276,10 @@ export function AreaPanel({
                 <div className="px-1 pb-1">
                   <p className="muted flex items-start gap-1.5 text-xs leading-relaxed">
                     <Webcam aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />
-                    No camera linked to this field yet.
+                    {t("No camera linked to this field yet.")}
                   </p>
                   <Link href="/watch" className="mt-1 inline-flex min-h-11 items-center text-xs font-semibold text-accent-700 underline-offset-4 hover:underline">
-                    Pair a phone
+                    {t("Pair a phone")}
                   </Link>
                 </div>
               ) : (
@@ -289,12 +299,12 @@ export function AreaPanel({
                         {camera.name}
                       </span>
                       <span className="muted shrink-0 text-[0.66rem] tabular-nums">
-                        {camera.totalDetections} tracks
+                        {t("{count} tracks", { count: camera.totalDetections })}
                       </span>
                       <Link
                         href="/watch"
                         className="icon-btn shrink-0 border-transparent bg-transparent text-ink-soft"
-                        aria-label={`Open ${camera.name} in live watch`}
+                        aria-label={t("Open {name} in live watch", { name: camera.name })}
                       >
                         <Video className="h-3.5 w-3.5" />
                       </Link>
@@ -313,7 +323,7 @@ export function AreaPanel({
               <span className="rounded bg-accent-500 px-1.5 py-0.5 text-white">
                 AI
               </span>
-              Insights
+              {t("Insights")}
             </span>
             {generating ? (
               <Sprout className="h-3.5 w-3.5 animate-pulse-soft text-accent-300" />
@@ -321,12 +331,12 @@ export function AreaPanel({
           </div>
           {generationError ? (
             <p role="alert" className="mt-3 text-xs leading-relaxed text-danger-100">
-              {generationError} Try generating the advisory again.
+              {t("{error} Try generating the advisory again.", { error: generationError })}
             </p>
           ) : null}
           {generating ? (
             <p className="mt-1.5 text-[0.72rem] text-[#f5f4ef]/60">
-              Reading the crop stage and forecast…
+              {t("Reading the crop stage and forecast…")}
             </p>
           ) : insight ? (
             <>
@@ -337,15 +347,14 @@ export function AreaPanel({
                 href="/crops"
                 className="mt-3 inline-flex min-h-11 items-center gap-1.5 text-xs font-semibold text-accent-300 underline-offset-4 hover:text-accent-100 hover:underline"
               >
-                Open the full action plan
+                {t("Open the full action plan")}
                 <Sparkles className="h-3 w-3" />
               </Link>
             </>
           ) : (
             <>
               <p className="mt-3 text-[0.8125rem] leading-relaxed text-leaf-100">
-                Add this week&apos;s advisory: the crop stage, the 7-day forecast
-                and the soil estimate become a short action plan for the field.
+                {t("Add this week's advisory: the crop stage, the 7-day forecast and the soil estimate become a short action plan for the field.")}
               </p>
               <button
                 type="button"
@@ -354,7 +363,7 @@ export function AreaPanel({
                 className="btn btn-secondary mt-4 w-full text-xs disabled:opacity-60"
               >
                 <Sparkles className="h-3 w-3" />
-                {crop ? "Generate advisory" : "Add a crop first"}
+                {crop ? t("Generate advisory") : t("Add a crop first")}
               </button>
             </>
           )}

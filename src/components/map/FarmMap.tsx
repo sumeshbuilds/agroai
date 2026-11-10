@@ -23,6 +23,7 @@ import type { CameraSessionDTO } from "@/lib/camera";
 import { cn } from "@/lib/cn";
 import { formatLandArea } from "@/lib/format";
 import { ESRI_ATTRIBUTION, ESRI_WORLD_IMAGERY_URL, FARM_ZOOM } from "@/lib/map";
+import { useI18n } from "@/lib/i18n";
 import type { FarmDTO, GeoPoint } from "@/lib/types";
 
 interface FarmMapProps {
@@ -36,13 +37,14 @@ interface FarmMapProps {
 
 /** Field index label rendered inside the polygon ("Area 1"). */
 function FarmLabel({ farm }: { farm: FarmDTO }) {
+  const { t } = useI18n();
   return (
     <span className="block text-center leading-tight text-white [text-shadow:0_1px_8px_rgba(20,20,10,0.65)]">
       <span className="block text-[0.78rem] font-semibold">
         {farm.name}
       </span>
       <span className="mt-1 block text-[0.6875rem] font-medium opacity-90">
-        {formatLandArea(farm.areaAcres)}
+        {t(formatLandArea(farm.areaAcres))}
       </span>
     </span>
   );
@@ -70,6 +72,7 @@ function MapControls({
   mapRef: RefObject<LeafletMap | null>;
 }) {
   const [locateError, setLocateError] = useState<string | null>(null);
+  const { t } = useI18n();
 
   const zoom = (delta: number) => mapRef.current?.setZoom(
     mapRef.current.getZoom() + delta,
@@ -107,14 +110,14 @@ function MapControls({
     <div className="absolute left-3 top-3 z-[500] flex flex-col items-start gap-2 sm:left-4 sm:top-4">
       {locateError ? (
         <span role="status" className="map-chip map-hint max-w-[10rem] rounded-lg text-xs text-danger-700">
-          {locateError}
+          {t(locateError)}
         </span>
       ) : null}
       <div className="map-panel flex flex-col rounded-xl p-1">
         <button
           type="button"
           onClick={() => zoom(1)}
-          aria-label="Zoom in"
+          aria-label={t("Zoom in")}
           className={controlClass}
         >
           <Plus className="h-4 w-4" />
@@ -122,7 +125,7 @@ function MapControls({
         <button
           type="button"
           onClick={() => zoom(-1)}
-          aria-label="Zoom out"
+          aria-label={t("Zoom out")}
           className={cn(controlClass, "my-0.5 rounded-lg")}
         >
           <Minus className="h-4 w-4" />
@@ -130,7 +133,7 @@ function MapControls({
         <button
           type="button"
           onClick={handleLocate}
-          aria-label="Move map to my location"
+          aria-label={t("Move map to my location")}
           className={controlClass}
         >
           <Crosshair className="h-4 w-4" />
@@ -139,8 +142,8 @@ function MapControls({
       <a
         href="/watch"
         className="map-panel icon-btn border-transparent"
-        aria-label="Open live camera watch"
-        title="Live camera watch"
+        aria-label={t("Open live camera watch")}
+        title={t("Live camera watch")}
       >
         <Video className="h-4 w-4" />
       </a>
@@ -149,19 +152,21 @@ function MapControls({
 }
 
 function EmptyFarmMap() {
+  const { t } = useI18n();
   return (
     <div className="card flex h-full min-h-[320px] flex-col items-center justify-center gap-3 p-6 text-center">
       <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-[var(--card-muted)] text-[var(--color-ink)]">
         <MapIcon className="h-6 w-6" />
       </span>
-      <p className="text-sm font-semibold">No fields mapped yet</p>
+      <p className="text-sm font-semibold">{t("No fields mapped yet")}</p>
       <p className="muted max-w-xs text-xs leading-relaxed">
-        Draw your field boundary on the satellite map — its centre powers your
-        weather and alerts.
+        {t(
+          "Draw your field boundary on the satellite map — its centre powers your weather and alerts.",
+        )}
       </p>
       <Link href="/map" className="btn btn-primary">
         <MapIcon className="h-4 w-4" />
-        Map your first field
+        {t("Map your first field")}
       </Link>
     </div>
   );
@@ -181,6 +186,7 @@ export function FarmMap({
   className,
 }: FarmMapProps) {
   const mapRef = useRef<LeafletMap | null>(null);
+  const { t } = useI18n();
 
   if (!selectedFarm) {
     return <EmptyFarmMap />;
@@ -237,7 +243,7 @@ export function FarmMap({
                   <FarmLabel farm={farm} />
                 ) : (
                   <span className="text-[0.66rem] font-semibold text-accent-700">
-                    Area {index + 1} · {farm.name}
+                    {t("Area {index} · {name}", { index: index + 1, name: farm.name })}
                   </span>
                 )}
               </Tooltip>
@@ -260,7 +266,7 @@ export function FarmMap({
               }}
             >
               <Tooltip>
-                {camera.name} · {camera.isLive ? "LIVE" : camera.status}
+                {camera.name} · {camera.isLive ? t("LIVE") : camera.status === "live" ? t("Live") : t("Ended")}
               </Tooltip>
             </CircleMarker>
           ))}
@@ -274,19 +280,19 @@ export function FarmMap({
       )}>
         <span className="map-chip">
           <Satellite className="h-3 w-3" />
-          Esri satellite
+          {t("Esri satellite")}
         </span>
         <span className="map-chip">
           <Layers className="h-3 w-3" />
-          {formatLandArea(selectedFarm.areaAcres)}
+          {t(formatLandArea(selectedFarm.areaAcres))}
         </span>
         <Link
           href="/map"
           className="toolbar-btn min-h-11 border-transparent text-xs shadow-[var(--shadow-card)]"
-          title="Draw or edit the field boundary"
+          title={t("Draw or edit the field boundary")}
         >
           <ExternalLink className="h-3 w-3" />
-          Edit boundary
+          {t("Edit boundary")}
         </Link>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { api, ApiError } from "@/lib/api-client";
 import { formatLandArea } from "@/lib/format";
 import type { CropDTO, FarmDTO } from "@/lib/types";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 
 /* -------------------------------------------------------------------------
    WorkbenchBar — the reference-style top strip: contextual slot on the left,
@@ -47,6 +48,7 @@ export function WorkbenchBar({
 
 function WorkbenchActions() {
   const router = useRouter();
+  const { t } = useI18n();
   const [searchOpen, setSearchOpen] = useState(false);
   const [bellCount, setBellCount] = useState(0);
   const [exporting, setExporting] = useState(false);
@@ -133,21 +135,21 @@ function WorkbenchActions() {
         type="button"
         onClick={() => setSearchOpen(true)}
         className="search-trigger hidden sm:inline-flex"
-        title="Search fields and crops (press /)"
+        title={t("Search fields and crops (press /)")}
       >
         <Search className="h-4 w-4" />
         <span>
-          Type{" "}
+          {t("Type")}{" "}
            <kbd className="rounded border border-[var(--color-line)] bg-[var(--card-muted)] px-1.5 py-0.5 text-xs">
             /
           </kbd>{" "}
-          to search
+          {t("to search")}
         </span>
       </button>
       <button
         type="button"
         onClick={() => setSearchOpen(true)}
-        aria-label="Search fields and crops"
+        aria-label={t("Search fields and crops")}
         className="icon-btn sm:hidden"
       >
         <Search className="h-4 w-4" />
@@ -157,17 +159,17 @@ function WorkbenchActions() {
         type="button"
         onClick={() => void exportData()}
         disabled={exporting}
-        title="Export fields and crops as JSON"
+        title={t("Export fields and crops as JSON")}
         className="toolbar-btn hidden disabled:cursor-not-allowed disabled:opacity-60 md:inline-flex"
       >
         <Download className="h-4 w-4" />
-        {exporting ? "Exporting…" : "Export"}
+        {exporting ? t("Exporting…") : t("Export")}
       </button>
 
       <Link
         href="/watch"
         className="icon-btn relative"
-        title={`Camera alerts${bellCount ? ` · ${bellCount} unread` : ""}`}
+        title={`${t("Camera alerts")}${bellCount ? ` · ${bellCount} ${t("unread")}` : ""}`}
       >
         <Bell className="h-4 w-4" />
         {bellCount > 0 ? (
@@ -180,10 +182,10 @@ function WorkbenchActions() {
       <Link
         href="/crops"
         className="btn btn-primary"
-        aria-label="Add a new crop"
+        aria-label={t("Add a new crop")}
       >
         <Plus className="h-4 w-4" />
-        <span className="hidden sm:inline">New Crop</span>
+        <span className="hidden sm:inline">{t("New Crop")}</span>
       </Link>
 
       {searchOpen ? <SearchOverlay onClose={() => setSearchOpen(false)} /> : null}
@@ -193,6 +195,7 @@ function WorkbenchActions() {
 
 function SearchOverlay({ onClose }: { onClose: () => void }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [query, setQuery] = useState("");
   const [farms, setFarms] = useState<FarmDTO[]>([]);
   const [crops, setCrops] = useState<CropDTO[]>([]);
@@ -262,7 +265,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
     <dialog
       ref={dialogRef}
       className="search-dialog"
-      aria-label="Search"
+      aria-label={t("Search")}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -281,8 +284,8 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
             ref={inputRef}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search fields, crops, growth stages…"
-            aria-label="Search fields, crops, growth stages"
+            placeholder={t("Search fields, crops, growth stages…")}
+            aria-label={t("Search fields, crops, growth stages")}
             className="min-w-0 flex-1 bg-transparent text-base outline-none placeholder:text-[var(--color-ink-soft)]"
             onKeyDown={(event) => {
               if (event.key === "Escape") onClose();
@@ -292,7 +295,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="Close search"
+            aria-label={t("Close search")}
             className="icon-btn border-transparent bg-transparent text-ink-soft"
           >
             <X className="h-4 w-4" />
@@ -301,13 +304,12 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
 
         <div className="max-h-[min(60dvh,28rem)] overflow-y-auto p-2.5">
           {loading ? (
-            <p className="muted px-3 py-6 text-center text-sm">Loading…</p>
+            <p className="muted px-3 py-6 text-center text-sm">{t("Loading…")}</p>
           ) : farms.length === 0 && crops.length === 0 ? (
             <div className="px-3 py-6 text-center">
-              <p className="text-sm font-semibold">Nothing mapped yet</p>
+              <p className="text-sm font-semibold">{t("Nothing mapped yet")}</p>
               <p className="muted mt-1 text-xs">
-                Draw your first field on the satellite map and it will appear
-                here.
+                {t("Draw your first field on the satellite map and it will appear here.")}
               </p>
               <button
                 type="button"
@@ -315,14 +317,14 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
                 className="btn btn-primary mt-3"
               >
                 <MapPin className="h-4 w-4" />
-                Open field map
+                {t("Open field map")}
               </button>
             </div>
           ) : (
             <>
               {farmHits.length > 0 ? (
                 <p className="muted px-3 pb-1 pt-2 text-[0.68rem] font-semibold uppercase tracking-[0.12em]">
-                  Fields
+                  {t("Fields")}
                 </p>
               ) : null}
               {farmHits.map((farm) => (
@@ -352,7 +354,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
 
               {cropHits.length > 0 ? (
                 <p className="muted px-3 pb-1 pt-3 text-[0.68rem] font-semibold uppercase tracking-[0.12em]">
-                  Crops
+                  {t("Crops")}
                 </p>
               ) : null}
               {cropHits.slice(0, 6).map((crop) => (
@@ -376,9 +378,13 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
                       ) : null}
                     </span>
                     <span className="muted block text-xs tabular-nums">
-                      Day {crop.ageDays}
-                      {crop.durationDays ? ` of ${crop.durationDays}` : ""} ·{" "}
-                      {crop.growthStage ?? "Seedling"}
+                      {crop.durationDays
+                        ? t("Day {day} of {total}", {
+                            day: crop.ageDays,
+                            total: crop.durationDays,
+                          })
+                        : t("Day {day}", { day: crop.ageDays })}{" "}
+                      · {t(crop.growthStage ?? "Seedling")}
                     </span>
                   </span>
                 </button>
@@ -386,7 +392,7 @@ function SearchOverlay({ onClose }: { onClose: () => void }) {
 
               {farmHits.length === 0 && cropHits.length === 0 ? (
                 <p className="muted px-3 py-6 text-center text-sm">
-                  No matches for “{query}”.
+                  {t("No matches for “{query}”.", { query })}
                 </p>
               ) : null}
             </>
@@ -414,13 +420,14 @@ export function FarmSwitcher({
   loading?: boolean;
 }) {
   const selected = farms.find((farm) => farm.id === selectedId) ?? farms[0];
+  const { t } = useI18n();
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-3">
       <label className="toolbar-btn relative min-w-0 max-w-full gap-2.5 py-0 pr-3">
         <span aria-hidden className="h-2 w-2 shrink-0 rounded-full bg-leaf-500" />
         <select
-          aria-label="Select field"
+          aria-label={t("Select field")}
           className="field-select w-[12.5rem] sm:w-[15rem]"
           title={selected?.name}
           value={selected?.id ?? ""}
@@ -428,7 +435,7 @@ export function FarmSwitcher({
           disabled={loading || farms.length === 0}
         >
           {farms.length === 0 ? (
-            <option value="">{loading ? "Loading fields…" : "No fields yet"}</option>
+            <option value="">{loading ? t("Loading fields…") : t("No fields yet")}</option>
           ) : farms.map((farm) => (
             <option key={farm.id} value={farm.id}>
               {farm.name}
@@ -439,10 +446,12 @@ export function FarmSwitcher({
       </label>
       {selected ? (
         <span className="chip hidden bg-[var(--card-muted)] text-ink-soft xl:inline-flex">
-          {farms.length} field{farms.length === 1 ? "" : "s"} mapped
+          {t(farms.length === 1 ? "{count} field mapped" : "{count} fields mapped", {
+            count: farms.length,
+          })}
         </span>
       ) : null}
-      <Link href="/map" className="icon-btn" aria-label="Map another field" title="Map another field">
+      <Link href="/map" className="icon-btn" aria-label={t("Map another field")} title={t("Map another field")}>
         <Plus className="h-4 w-4" />
       </Link>
     </div>

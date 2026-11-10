@@ -696,15 +696,34 @@
     --ring: var(--color-accent-300);
   }
 
-  .alarm-banner {
-    border: 1px solid color-mix(in srgb, var(--color-leaf-600) 18%, transparent);
-    border-radius: var(--radius-card);
-    background: var(--color-leaf-100);
+  /* Floating field-alarm popups (bottom-right / above the mobile dock) */
+  .alarm-toast {
+    animation: alarm-toast-in var(--duration-panel) var(--ease-out);
   }
 
-  .alarm-banner[data-alerting="true"] {
-    border-color: color-mix(in srgb, var(--color-danger-500) 25%, transparent);
-    background: var(--color-danger-100);
+  .alarm-toast-ring {
+    animation: alarm-ring 1.5s ease-out infinite;
+  }
+
+  @keyframes alarm-toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0) scale(1);
+    }
+  }
+
+  @keyframes alarm-ring {
+    0% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-danger-500) 45%, transparent);
+    }
+    70%,
+    100% {
+      box-shadow: 0 0 0 0.55rem color-mix(in srgb, var(--color-danger-500) 0%, transparent);
+    }
   }
 
   @media (min-width: 64rem) {
@@ -951,7 +970,9 @@ body .leaflet-container {
   .ping-slow,
   .animate-pulse,
   .animate-spin,
-  .animate-pulse-soft {
+  .animate-pulse-soft,
+  .alarm-toast,
+  .alarm-toast-ring {
     animation: none;
   }
 

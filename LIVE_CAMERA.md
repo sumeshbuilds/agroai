@@ -199,9 +199,10 @@ GROQ_TIMEOUT_MS=4500
    field or a volunteer.
 4. **Start the stream** — the phone shows `LIVE`, `AI ready`, and detection chips.
 5. **Walk through frame** — the laptop shows a **Person** box, a movement trail,
-   confidence and direction. After ~1 second the track is confirmed and an alarm
-   appears at the top of the dashboard.
-6. **Sound the alarm** — tap **Siren on** in the alarm banner (arms audio +
+   confidence and direction. After ~1 second the track is confirmed and a
+   notification popup slides in with a continuous high-pitched siren.
+6. **Sound the alarm** — the siren loops until every alarm is dismissed, or tap
+   **Siren on** in the popup controls to mute it (this also arms audio +
    notifications). Walk in again after the cooldown to hear it. Point out that
    vehicles and random motion are ignored.
 7. **Show the field context** — the phone GPS links the camera to the nearest

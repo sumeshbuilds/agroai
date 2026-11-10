@@ -6,6 +6,7 @@ import { LogOut } from "lucide-react";
 
 import { api } from "@/lib/api-client";
 import { cn } from "@/lib/cn";
+import { useI18n } from "@/lib/i18n";
 
 export function SignOutButton({
   className,
@@ -17,6 +18,7 @@ export function SignOutButton({
   rail?: boolean;
 }) {
   const router = useRouter();
+  const { t } = useI18n();
   const [loading, setLoading] = useState(false);
 
   const handleSignOut = async () => {
@@ -35,8 +37,8 @@ export function SignOutButton({
         type="button"
         onClick={() => void handleSignOut()}
         disabled={loading}
-        title={loading ? "Signing out…" : "Sign out"}
-        aria-label="Sign out"
+        title={loading ? t("Signing out…") : t("Sign out")}
+        aria-label={t("Sign out")}
         className={cn(
           "rail-btn disabled:opacity-50",
           loading ? "opacity-50" : "",
@@ -58,11 +60,11 @@ export function SignOutButton({
         compact ? "h-11 w-11 px-0" : "min-h-11",
         className,
       )}
-      title="Sign out"
+      title={t("Sign out")}
     >
       <LogOut className="h-4 w-4" />
       <span className={compact ? "sr-only" : ""}>
-        {loading ? "Signing out…" : "Sign out"}
+        {loading ? t("Signing out…") : t("Sign out")}
       </span>
     </button>
   );
