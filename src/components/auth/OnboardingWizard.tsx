@@ -116,7 +116,7 @@ export function OnboardingWizard() {
       try {
         const { farmer } = await api.me();
         if (farmer) {
-          router.replace("/");
+          router.replace("/dashboard");
           return;
         }
         if (active) {
@@ -220,7 +220,7 @@ export function OnboardingWizard() {
         cropDays: Math.round(cropDayNumber),
         durationDays: Math.round(durationNumber),
       });
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (cause) {
       const apiError = cause instanceof ApiError ? cause : null;
       setError(apiError?.message ?? "Could not create your account.");

@@ -12,8 +12,8 @@
 @theme {
   --font-sans: var(--font-dm-sans), var(--font-oriya), "DM Sans", ui-sans-serif,
     system-ui, sans-serif;
-  --font-display: var(--font-dm-sans), var(--font-oriya), "DM Sans", ui-sans-serif,
-    system-ui, sans-serif;
+  --font-display: var(--font-bricolage), var(--font-oriya),
+    "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 
   /* Canvas & ink */
@@ -72,6 +72,16 @@
   --color-rail: #18291f;
   --color-rail-soft: #aebcaf;
   --color-rail-hover: #2a3d30;
+
+  /* Marketing surface — the approved Farm Guardian accents, used with
+     restraint on the public page so the workstation stays the reference. */
+  --color-paper-warm: #f5f1e6;
+  --color-forest-deep: #11261b;
+  --color-lime-field: #c9f26c;
+  --color-lime-soft: #e8f9c2;
+  --color-plum: #53369b;
+  --color-plum-deep: #2b1a4d;
+  --color-plum-soft: #e9e2fa;
 
   /* ---------------------------------------------------------------------
      Legacy aliases — the earlier "Farm Guardian" class names re-pointed to
@@ -832,6 +842,114 @@
   animation: pulse-soft 2s var(--ease-in-out) infinite;
 }
 
+/* ---------------------------------------------------------------------------
+   Landing page — survey-sheet rules and one authored field-console moment.
+--------------------------------------------------------------------------- */
+.landing-shell {
+  width: 100%;
+  max-width: 84rem;
+  margin-inline: auto;
+  padding-inline: clamp(1.25rem, 4.5vw, 4rem);
+}
+
+.landing-hero-grid {
+  background-image: linear-gradient(
+    to right,
+    color-mix(in srgb, var(--color-ink) 7%, transparent) 1px,
+    transparent 1px
+  );
+  background-size: 25% 100%;
+  background-position: center;
+}
+
+.landing-alert {
+  animation: landing-alert-in 640ms 900ms var(--ease-out) both;
+}
+
+.landing-pin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: landing-pin-pulse 2.8s var(--ease-in-out) infinite;
+}
+
+.landing-sweep {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: landing-sweep 7s linear infinite;
+}
+
+.landing-scanline {
+  animation: landing-scan 2.8s var(--ease-in-out) infinite alternate;
+}
+
+@keyframes landing-alert-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes landing-pin-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.72);
+  }
+  50% {
+    opacity: 0;
+    transform: scale(1.6);
+  }
+}
+
+@keyframes landing-sweep {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes landing-scan {
+  from {
+    transform: translateY(-22%);
+    opacity: 0.45;
+  }
+  to {
+    transform: translateY(22%);
+    opacity: 1;
+  }
+}
+
+.landing-cta {
+  background: var(--color-lime-field);
+  color: var(--color-forest-deep);
+  box-shadow: 0 3px 0 0 color-mix(in srgb, var(--color-leaf-700) 55%, transparent);
+}
+
+.landing-cta:active {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 0 color-mix(in srgb, var(--color-leaf-700) 55%, transparent);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .landing-cta:hover {
+    background: #d7fa87;
+  }
+
+  .landing-lift {
+    transition:
+      transform var(--duration-panel) var(--ease-out),
+      box-shadow var(--duration-panel) var(--ease-out);
+  }
+
+  .landing-lift:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-floating);
+  }
+}
+
 /* Plant doctor: a thin light line sweeps over the photo while the AI reads it. */
 .scan-line {
   position: absolute;
@@ -1004,7 +1122,11 @@ body .leaflet-container {
   .animate-pulse-soft,
   .alarm-toast,
   .alarm-toast-ring,
-  .scan-line {
+  .scan-line,
+  .landing-alert,
+  .landing-pin,
+  .landing-sweep,
+  .landing-scanline {
     animation: none;
   }
 

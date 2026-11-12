@@ -19,7 +19,7 @@ export default function NotFound() {
       <p className="muted max-w-sm text-[0.9rem] leading-relaxed">
         {t("This page is not part of AgroAI. Head back to your workstation.")}
       </p>
-      <Link href="/" className="btn btn-primary">
+      <Link href="/dashboard" className="btn btn-primary">
         {t("Back to dashboard")}
       </Link>
     </main>

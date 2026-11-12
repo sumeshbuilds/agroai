@@ -32,7 +32,7 @@ export function LoginForm() {
     setLoading(true);
     try {
       await api.login({ name, pin });
-      router.replace("/");
+      router.replace("/dashboard");
     } catch (cause) {
       setError(
         cause instanceof ApiError

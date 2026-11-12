@@ -29,16 +29,16 @@ export function isDegradedLink(input: {
 
 /**
  * Abort a hung upload before it freezes the whole loop. Even on a slow link the
- * frame is downscaled heavily, so 14–18 s is plenty; measured time extends it
- * only up to 25 s.
+ * frame is downscaled heavily, so 12–16 s is plenty; measured time extends it
+ * only up to 20 s.
  */
 export function uploadTimeoutMs(input: {
   slow: boolean;
   uploadMs: number;
 }): number {
   const measured = input.uploadMs > 0 ? input.uploadMs * 2.5 : 0;
-  const base = input.slow ? 14_000 : 18_000;
-  return Math.round(Math.min(25_000, Math.max(8_000, base, measured)));
+  const base = input.slow ? 12_000 : 16_000;
+  return Math.round(Math.min(20_000, Math.max(8_000, base, measured)));
 }
 
 /** 2 s, 4 s, 8 s, 16 s, 30 s … after consecutive failures. */
@@ -48,22 +48,24 @@ export function uploadBackoffMs(failures: number): number {
 }
 
 /**
- * Target roughly half of the measured link capacity: if a frame takes 4 s to
- * send, wait at least 8 s before sending the next one. The cap keeps the live
- * view from going completely stale.
+ * Keep a good link at the original snappy cadence. Only a measured slow link,
+ * a failure, or a genuinely slow upload gets the bandwidth-saving 2× gap.
  */
 export function uploadCadenceMs(input: LinkTuningInput): number {
-  const measured = input.uploadMs > 0 ? input.uploadMs * 2 : 0;
+  const degraded =
+    input.slow || input.failures > 0 || input.uploadMs > 3_000;
+  const measured =
+    input.uploadMs > 0 ? input.uploadMs * (degraded ? 2 : 1.25) : 0;
   const backoff = uploadBackoffMs(input.failures);
-  const cap = input.slow ? 30_000 : 20_000;
+  const cap = degraded ? 30_000 : 15_000;
   return Math.round(
     Math.min(cap, Math.max(input.baseIntervalMs, measured, backoff)),
   );
 }
 
 /**
- * Dashboard metadata poll interval. Slow/hidden/failed links poll less often;
- * a live session still refreshes fast enough to feel immediate on a good link.
+ * Dashboard metadata poll interval. A healthy live link stays under a second;
+ * slow, hidden and failed links back off without making the normal case laggy.
  */
 export function nextPollDelay(input: {
   hidden: boolean;
@@ -73,19 +75,19 @@ export function nextPollDelay(input: {
   slow: boolean;
   hasFrame: boolean;
 }): number {
-  if (!input.online) return 10_000;
-  if (input.hidden) return 15_000;
+  if (!input.online) return 8_000;
+  if (input.hidden) return 12_000;
 
   const base = input.live
     ? input.slow
-      ? 4_000
-      : 1_500
+      ? 2_500
+      : 800
     : input.hasFrame
-      ? 6_000
-      : 2_500;
+      ? 4_000
+      : 2_000;
   const backoff =
     input.failures > 0
-      ? Math.min(15_000, 1_500 * 2 ** Math.min(input.failures, 4))
+      ? Math.min(10_000, 2_000 * 2 ** Math.min(input.failures - 1, 3))
       : 0;
 
   return Math.max(base, backoff);
@@ -97,8 +99,8 @@ export function nextSessionListDelay(input: {
   online: boolean;
   failures: number;
 }): number {
-  if (!input.online) return 15_000;
-  if (input.hidden) return 20_000;
-  if (input.failures <= 0) return 8_000;
-  return Math.min(30_000, 8_000 + 4_000 * Math.min(input.failures, 4));
+  if (!input.online) return 10_000;
+  if (input.hidden) return 15_000;
+  if (input.failures <= 0) return 6_000;
+  return Math.min(24_000, 6_000 + 3_000 * Math.min(input.failures, 6));
 }

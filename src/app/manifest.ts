@@ -6,16 +6,16 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "AgroAI",
     description:
       "Farmland mapping, hyper-local weather, AI weekly crop advice, plant-photo disease detection and a live phone-powered field camera.",
-    start_url: "/",
+    start_url: "/dashboard",
     display: "standalone",
-    background_color: "#f4f7f2",
-    theme_color: "#047857",
+    background_color: "#f2f3ed",
+    theme_color: "#18291f",
     orientation: "portrait",
     icons: [
       {
-        src: "/favicon.ico",
+        src: "/icon.svg",
         sizes: "any",
-        type: "image/x-icon",
+        type: "image/svg+xml",
       },
     ],
   };

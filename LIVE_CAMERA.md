@@ -113,7 +113,7 @@ Phone /camera
                           │    → relabel species / mark verified / flag for review
                           ▼
 Laptop /watch + dashboard
-  /watch polls the session every ~1.5 s (4 s on slow links, backing off on
+  /watch polls the session every ~0.8 s (2.5 s on slow links, backing off on
   failures); the alarm manager polls /api/camera/alerts every ~3 s
   (8 s while the tab is hidden)
   <img> = latest frame (versioned, cached)
@@ -126,7 +126,7 @@ Laptop /watch + dashboard
 - Frames are versioned with `?v=<timestamp>` and cached, so the browser only
   downloads a new image when the phone sends one. Hidden tabs poll metadata
   only, so an idle dashboard does not keep downloading JPEGs.
-- The player polls at ~1.5 s (4 s on a slow link) and backs off exponentially
+- The player polls at ~0.8 s (2.5 s on a slow link) and backs off exponentially
   when metadata/frame requests fail. The phone uploads every 0.7 s while
   something is moving (2.6 s when idle) on a good link, and stretches the gap
   automatically when measured upload time or failures require it. Expected

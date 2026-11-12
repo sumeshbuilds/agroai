@@ -12,6 +12,10 @@ live field camera that recognises people and animals in near real time.
 
 ## Features
 
+The public landing page at `/` introduces Land Security and Plant Security with
+a tabbed, illustrative tour of the workstation. The signed-in app opens at
+`/dashboard`.
+
 1. **Name + PIN accounts & onboarding** — a 4-step flow collects the farmer's
    name, farm, crop and crop day, then creates a PIN (suggested as `name1234`).
    Every farm, crop, report, weather and camera request is scoped to the

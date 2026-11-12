@@ -513,6 +513,25 @@ export function WatchView() {
 
   const phoneIsSecure = phoneUrl.startsWith("https://");
 
+  // The QR SVG is expensive to regenerate and the pairing URL is stable for a
+  // session. Memoising it keeps the live frame poll from re-rendering it every
+  // ~800 ms while the operator watches the video.
+  const pairingQr = useMemo(
+    () =>
+      phoneUrl ? (
+        <QRCode
+          value={phoneUrl}
+          size={168}
+          style={{ height: "auto", maxWidth: "100%", width: "100%" }}
+          bgColor="#ffffff"
+          fgColor="#18291f"
+        />
+      ) : (
+        <div className="aspect-square w-full animate-pulse-soft rounded bg-card-muted" />
+      ),
+    [phoneUrl],
+  );
+
   // ---- actions -----------------------------------------------------------
   const beginMutation = () => {
     if (mutationRef.current) return false;
@@ -882,17 +901,7 @@ export function WatchView() {
                     <>
                       <div className="grid grid-cols-1 items-start gap-4 min-[380px]:grid-cols-[8rem_minmax(0,1fr)] sm:grid-cols-[9rem_minmax(0,1fr)]">
                         <div className="w-40 max-w-full rounded-xl bg-white p-2 min-[380px]:w-auto">
-                          {phoneUrl ? (
-                            <QRCode
-                              value={phoneUrl}
-                              size={168}
-                              style={{ height: "auto", maxWidth: "100%", width: "100%" }}
-                              bgColor="#ffffff"
-                              fgColor="#18291f"
-                            />
-                          ) : (
-                            <div className="aspect-square w-full animate-pulse-soft rounded bg-card-muted" />
-                          )}
+                          {pairingQr}
                         </div>
                         <div className="min-w-0 flex-1">
                           <p className="break-words text-sm font-semibold">{selectedSession.name}</p>

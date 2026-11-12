@@ -50,7 +50,10 @@ export async function encodeCameraFrame(
   options.signal?.throwIfAborted();
   if (snapshot.canvas.width <= 0 || snapshot.canvas.height <= 0) throw new Error("Camera frame has no pixels.");
   const active = snapshot.detections.some((item) => !item.coasting);
-  const targetWidth = active ? slow ? 360 : 560 : slow ? 320 : 460;
+  // The detector still runs on a 720 px canvas; only the dashboard preview is
+  // downscaled. 480/400 px roughly halves the per-frame bytes versus the old
+  // 560/460 px set while staying readable on a laptop.
+  const targetWidth = active ? slow ? 320 : 480 : slow ? 280 : 400;
   const width = Math.min(targetWidth, snapshot.canvas.width);
   const height = Math.max(1, Math.round(snapshot.canvas.height / snapshot.canvas.width * width));
   const canvas = document.createElement("canvas");
@@ -85,7 +88,7 @@ export async function encodeCameraFrame(
     const timer = window.setTimeout(() => finish(null, new Error("Camera frame encoding timed out.")), options.timeoutMs ?? ENCODE_TIMEOUT_MS);
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) { abort(); return; }
-    try { canvas.toBlob((blob) => finish(blob), "image/jpeg", active ? slow ? 0.4 : 0.6 : slow ? 0.34 : 0.46); }
+    try { canvas.toBlob((blob) => finish(blob), "image/jpeg", active ? slow ? 0.36 : 0.52 : slow ? 0.3 : 0.42); }
     catch (cause) { finish(null, cause); }
   });
   return { blob, meta, trackIds: meta.detections.filter((item) => item.confirmed && !item.coasting).map((item) => item.trackId) };

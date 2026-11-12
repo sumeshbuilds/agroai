@@ -39,9 +39,9 @@ test("JPEG encoding freezes metadata and resized pixels before its asynchronous 
   source.geo!.lat = 50;
   finish(new Blob(["jpeg"], { type: "image/jpeg" }));
   const result = await promise;
-  assert.deepEqual(drawnSize, [0, 0, 560, 315]);
-  assert.equal(output.width, 560);
-  assert.equal(quality, 0.6);
+  assert.deepEqual(drawnSize, [0, 0, 480, 270]);
+  assert.equal(output.width, 480);
+  assert.equal(quality, 0.52);
   assert.equal(result.meta.capturedAt, "2026-11-10T09:00:00.000Z");
   assert.equal(result.meta.detections[0].box[0], 0.2);
   assert.equal(result.meta.detections[0].path![0][0], 0.275);
@@ -87,8 +87,8 @@ test("coasting boxes are not alarm tracks; slow links shrink JPEGs without upsca
   const source = snapshot();
   source.detections[0].coasting = true;
   const frame = await encodeCameraFrame(source, true, "Test");
-  assert.equal(output.width, 320);
-  assert.equal(quality, 0.34);
+  assert.equal(output.width, 280);
+  assert.equal(quality, 0.3);
   assert.equal(frame.meta.quality, "low");
   assert.deepEqual(frame.trackIds, []);
   source.canvas = { width: 120, height: 80 } as HTMLCanvasElement;

@@ -753,9 +753,9 @@ export function CameraStreamView() {
       () => controller.abort(),
       uploadTimeoutMs({ slow: degraded, uploadMs: uploadMsRef.current }),
     );
-    const start = performance.now();
     let phase: "encode" | "upload" = "encode";
     let succeeded = false;
+    let uploadStartedAt = 0;
     try {
       const queued = eventBufferRef.current.size > 0;
       const snapshot = aiReadyRef.current ? snapshotRef.current : captureSnapshot();
@@ -766,6 +766,7 @@ export function CameraStreamView() {
       if (!accept() || !frame) return;
       controller.signal.throwIfAborted();
       phase = "upload";
+      uploadStartedAt = performance.now();
       const response = await api.postCameraFrameMultipart(token, frame.meta, frame.blob, { signal: controller.signal });
       if (!accept()) return;
       controller.signal.throwIfAborted();
@@ -812,11 +813,16 @@ export function CameraStreamView() {
       }
     } finally {
       window.clearTimeout(timeout);
-      const elapsed = performance.now() - start;
-      // A timed-out/failed attempt says little about the link's true capacity
-      // (the server may have been down). Cap it so the next retry is not
-      // delayed by the full timeout; failures drive the real backoff.
-      uploadMsRef.current = succeeded ? elapsed : Math.min(elapsed, 5_000);
+      // Measure the network leg only. Encoding a JPEG on a phone can take
+      // 0.5–1 s and used to inflate the "slow link" estimate, which then
+      // stretched every upload gap and made the live view lag.
+      const networkElapsed =
+        uploadStartedAt > 0 ? performance.now() - uploadStartedAt : 0;
+      uploadMsRef.current = succeeded
+        ? networkElapsed
+        : networkElapsed > 0
+          ? Math.min(networkElapsed, 5_000)
+          : 0;
       if (uploadControllerRef.current === controller) uploadControllerRef.current = null;
       uploadBusyRef.current = false;
     }

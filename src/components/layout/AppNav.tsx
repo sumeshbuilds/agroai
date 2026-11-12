@@ -17,7 +17,7 @@ import { LanguageToggle } from "@/components/layout/LanguageToggle";
 import { useI18n } from "@/lib/i18n";
 
 const LINKS = [
-  { href: "/", label: "Overview", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
   { href: "/detect", label: "Scan", icon: ScanLine },
   { href: "/map", label: "Field map", icon: MapIcon },
   { href: "/watch", label: "Watch", icon: Radar },
@@ -31,7 +31,9 @@ export function AppRail() {
   const { t } = useI18n();
 
   const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+    href === "/dashboard"
+      ? pathname === "/dashboard"
+      : pathname.startsWith(href);
 
   return (
     <aside
@@ -39,7 +41,7 @@ export function AppRail() {
       className="rail flex h-full w-[5.25rem] shrink-0 flex-col items-center gap-2 py-4"
     >
       <Link
-        href="/"
+        href="/dashboard"
         aria-label={t("AgroAI home")}
         title="AgroAI"
         className="brand-mark mb-5 h-12 w-12"
@@ -91,13 +93,15 @@ export function AppMobile() {
   const { t } = useI18n();
 
   const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+    href === "/dashboard"
+      ? pathname === "/dashboard"
+      : pathname.startsWith(href);
 
   return (
     <>
       <header className="flex h-16 items-center justify-between border-b border-[var(--color-line)] bg-[var(--background)] px-4">
         <Link
-          href="/"
+          href="/dashboard"
           className="flex min-h-11 items-center gap-2 text-[1.05rem] font-semibold tracking-tight"
         >
           <span className="brand-mark h-9 w-9">

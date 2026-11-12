@@ -24,8 +24,9 @@ AgroAI is a zero-cost MVP web application (PWA) for farmers. It provides four co
 ```text
 src/
 ├── app/
+│   ├── page.tsx                   # Public landing page (Land Security + Plant Security showcase)
 │   ├── (dashboard)/
-│   │   ├── page.tsx               # Main Farmer Dashboard (Live camera card + Weather + Crop guide)
+│   │   ├── dashboard/page.tsx     # Main Farmer Dashboard (Live camera card + Weather + Crop guide)
 │   │   ├── map/page.tsx           # Interactive Satellite Map (draw farm + area)
 │   │   ├── crops/page.tsx         # Crop Management & Weekly AI Reports
 │   │   ├── detect/page.tsx        # Plant doctor: photo capture, AI result, scan history
@@ -38,6 +39,7 @@ src/
 │   │   ├── camera/…               # Sessions, pairing tokens, frame ingest/serve, alarms, LAN IPs
 │   │   └── cron/weekly-report/route.ts # Generates weekly Gemini AI crop report
 ├── components/
+│   ├── landing/...                  # Public nav, field console, tabbed product showcase
 │   ├── map/…                      # Leaflet boundary drawer + read-only dashboard map
 │   ├── camera/CameraStreamView    # Mobile camera, on-device AI, overlays, uploads
 │   ├── disease/…                  # Plant doctor capture, result card, scan history

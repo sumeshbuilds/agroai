@@ -366,7 +366,7 @@ production build (`next start`) with live Neon/Open-Meteo data.
 - `/onboarding` is a 4-step wizard: name → select/draw farm → crop + crop day +
   duration → PIN. The PIN is suggested as `name1234` (editable) and login is
   always name + PIN.
-- `/login` signs in and `/` is wrapped in an `AuthGate`; the dashboard nav shows
+- `/login` signs in and `/dashboard` is wrapped in an `AuthGate`; the dashboard nav shows
   the farmer's name and a **Sign out** button.
 - Every data route is now scoped to the session: farms, crops, reports, weather
   and the weekly-report generator only touch the signed-in farmer's rows.
@@ -613,21 +613,20 @@ animal into a real dashboard alarm — while staying usable on weak mobile data.
 
 **6a. Weak-link and sync hardening (12 Nov 2026)**
 
-- Upload cadence now derives from the **measured** attempt (`uploadMs`, failures)
-  as well as `navigator.connection`: failed attempts back off 2 → 4 → 8 → 16 →
-  30 s and the next frame is sent only after roughly half the link's measured
-  capacity has been used. A hung request is aborted after 14–25 s instead of
-  20–30 s.
+- Upload cadence now derives from the measured **network** leg (`uploadMs`,
+  failures) as well as `navigator.connection`: a healthy link keeps the original
+  1.25× gap, while a slow/failed link doubles it and backs off 2 → 4 → 8 → 16 →
+  30 s. A hung request is aborted after 12–20 s instead of 20–30 s.
 - The phone stops posting while `navigator.onLine` is false, keeps detection
   local, and resumes immediately on `online`. Confirmed event frames remain in
   the bounded buffer; a growing backlog also switches new event frames to the
   smaller/cheaper encode.
 - `LIVE_WINDOW_MS` is 45 s, so a phone uploading every 20–30 s no longer flips
   between live/offline. The dashboard shows an explicit "Reconnecting…" state.
-- `/watch` polling is adaptive: 1.5 s live / 4 s slow, exponential backoff on
-  failures (3 → 6 → 12 → 15 s), 15 s when hidden, and metadata-only while the
-  tab is hidden (no JPEG download). The cheap session-list poll backs off to
-  30 s. The list/detail snapshots are timestamped so an external stop/restart is
+- `/watch` polling is adaptive: 0.8 s live / 2.5 s slow, exponential backoff on
+  failures (2 → 4 → 8 → 10 s), 12 s when hidden, and metadata-only while the tab
+  is hidden (no JPEG download). The cheap session-list poll backs off from 6 s to
+  24 s. The list/detail snapshots are timestamped so an external stop/restart is
   reflected even if the detail poll is stalled.
 - Server ingest returns the updated session metadata from the same `UPDATE`
   round trip, removing a second query from every frame upload.

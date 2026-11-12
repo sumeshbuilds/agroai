@@ -1,12 +1,24 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import { cookies } from "next/headers";
-import { DM_Sans, Geist_Mono, Noto_Sans_Oriya } from "next/font/google";
+import {
+  Bricolage_Grotesque,
+  DM_Sans,
+  Geist_Mono,
+  Noto_Sans_Oriya,
+} from "next/font/google";
 
 import { I18nProvider } from "@/lib/i18n/provider";
 import { LANG_COOKIE, htmlLang, normalizeLang } from "@/lib/i18n/core";
 
 import "./globals.css";
+
+const bricolage = Bricolage_Grotesque({
+  variable: "--font-bricolage",
+  subsets: ["latin"],
+  axes: ["opsz"],
+  display: "swap",
+});
 
 const dmSans = DM_Sans({
   variable: "--font-dm-sans",
@@ -58,7 +70,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
   return (
     <html
       lang={htmlLang(lang)}
-      className={`${dmSans.variable} ${oriya.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${bricolage.variable} ${dmSans.variable} ${oriya.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full">
         <I18nProvider initialLang={lang}>{children}</I18nProvider>
