@@ -1,4 +1,8 @@
-import { DatabaseNotConfiguredError } from "@/db";
+import {
+  DatabaseNotConfiguredError,
+  describeError,
+  isDatabaseError,
+} from "@/db";
 import type { ApiError } from "./types";
 
 export class BadRequestError extends Error {
@@ -35,8 +39,15 @@ export function handleRouteError(error: unknown): Response {
     return fail(error.message, 400, { code: "BAD_REQUEST" });
   }
 
+  if (isDatabaseError(error)) {
+    console.error("[api] database request failed:", describeError(error));
+    return fail("The database is temporarily unavailable. Please try again.", 503, {
+      code: "DB_UNAVAILABLE",
+    });
+  }
+
   const message = error instanceof Error ? error.message : "Unexpected error";
-  console.error("[api] request failed:", error);
+  console.error("[api] request failed:", describeError(error));
   return fail(message, 500);
 }
 
