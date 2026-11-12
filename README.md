@@ -98,10 +98,11 @@ Android Chrome insecure-origin flag. Full steps:
 | `GEMINI_MODEL` | No | Overrides the model (default `gemini-3.8-flash`). |
 | `DISEASE_GEMINI_TIMEOUT_MS` | No | Plant-scan Gemini timeout in ms (default `40000`, max `55000`). |
 | `GEMINI_BASE_URL` | No | Overrides the Gemini endpoint (proxy or local mock). |
-| `GROQ_API_KEY` | No | Enables the Groq vision verifier for camera tracks and the plant-doctor fallback. |
+| `GROQ_API_KEY` | No | Enables the Groq vision verifier for camera tracks, the plant-doctor fallback and the low-confidence second opinion. |
 | `GROQ_VISION_MODEL` | No | Overrides the verifier model (default `qwen/qwen3.8-27b`). |
-| `GROQ_DISEASE_MODEL` | No | Plant-scan fallback model (default `qwen/qwen3.8-27b`). |
+| `GROQ_DISEASE_MODEL` | No | Plant-scan fallback/second-opinion model (default `qwen/qwen3.8-27b`). |
 | `GROQ_DISEASE_TIMEOUT_MS` | No | Plant-scan Groq timeout in ms (default `18000`, max `45000`). |
+| `DISEASE_SECOND_OPINION` | No | Set `false` to skip the Groq cross-check on uncertain plant scans. |
 | `GROQ_TIMEOUT_MS` | No | Camera verifier timeout in ms (default `4500`, max `15000`). |
 | `CRON_SECRET` | No | Protects `/api/cron/weekly-report`. |
 
@@ -119,6 +120,7 @@ on-device labels are used as-is and no frame leaves your server.
 | `npm run build` / `npm run start` | Production build and serve. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run lint` | ESLint. |
+| `npm test` / `npm run test:disease` | Camera unit tests plus plant-doctor normaliser/merge tests. |
 | `npm run db:generate` | Generate SQL migrations from the Drizzle schema. |
 | `npm run db:push` | Apply the schema to Neon. |
 | `npm run db:studio` | Open Drizzle Studio. |

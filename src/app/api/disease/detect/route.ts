@@ -4,11 +4,17 @@ import {
   analysePlantImage,
   DiseaseAiUnavailableError,
   isDiseaseAiConfigured,
+  type DiseaseContext,
 } from "@/lib/disease-ai";
+import {
+  cropContext,
+  knownThreatsForCrop,
+  loadWeatherContext,
+} from "@/lib/disease-context";
 import { createDiseaseScan } from "@/lib/disease-queries";
 import { isPlantPart, type PlantPart } from "@/lib/disease";
 import { fail, handleRouteError, ok } from "@/lib/http";
-import { getCropWithFarm } from "@/lib/queries";
+import { getCropWithFarm, toCropDTO } from "@/lib/queries";
 
 export const maxDuration = 60;
 
@@ -104,6 +110,8 @@ export async function POST(request: Request) {
         ? String(form.get("cropName")).trim().slice(0, 80) || null
         : null;
 
+    let cropRow: Awaited<ReturnType<typeof getCropWithFarm>> = null;
+
     if (cropId !== null) {
       const owned = await getCropWithFarm(db, cropId, farmer.id);
       if (!owned) {
@@ -111,6 +119,7 @@ export async function POST(request: Request) {
           code: "CROP_NOT_FOUND",
         });
       }
+      cropRow = owned;
       cropName = owned.crop.cropName;
     }
 
@@ -125,12 +134,38 @@ export async function POST(request: Request) {
         ? noteRaw.replace(/\s+/g, " ").trim().slice(0, 400) || null
         : null;
 
+    // Crop stage + live weather give the vision model a factual prior, which
+    // makes fungal/bacterial/pest rankings much more reliable. Both are
+    // best-effort: a missing farm or slow forecast must not block the scan.
+    let context: DiseaseContext | null = null;
+    if (cropRow) {
+      const crop = toCropDTO({
+        ...cropRow.crop,
+        farmlandName: cropRow.farm?.name ?? null,
+      });
+      const weather = cropRow.farm
+        ? await loadWeatherContext(cropRow.farm)
+        : null;
+      context = cropContext({
+        cropName: crop.cropName,
+        ageDays: crop.ageDays,
+        durationDays: crop.durationDays,
+        weather,
+      });
+    } else if (cropName) {
+      context = {
+        cropName,
+        knownThreats: knownThreatsForCrop(cropName),
+      };
+    }
+
     const result = await analysePlantImage({
       imageBase64: Buffer.from(bytes).toString("base64"),
       mimeType,
       cropName,
       plantPart,
       note,
+      context,
     });
 
     const scan = await createDiseaseScan(db, {

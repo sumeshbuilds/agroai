@@ -66,6 +66,13 @@ export const WATCH: Record<string, string> = {
     "ଏହି କ୍ୟାମେରାକୁ ଆପଣଙ୍କ ଉପଗ୍ରହ-ମାନଚିତ୍ରିତ ଜମି ସହ ଲିଙ୍କ୍ କରି ଅତି ସ୍ଥାନୀୟ ପାଣିପାଗ ଦେଖାଇବାକୁ ଫୋନ୍ରେ ସ୍ଥାନ ଅନୁମତି ଦିଅନ୍ତୁ।",
   "Streaming": "ଷ୍ଟ୍ରିମିଂ",
   "Offline": "ଅଫଲାଇନ୍",
+  "Reconnecting…": "ପୁଣି ସଂଯୋଗ ହେଉଛି…",
+  "Camera connection lost. The previous matching image and boxes are kept; tap Refresh to retry.":
+    "କ୍ୟାମେରା ସଂଯୋଗ କଟିଗଲା। ପୂର୍ବର ମେଳ ଖାଉଥିବା ଫଟୋ ଓ ବକ୍ସ ରଖାଯାଇଛି; ପୁଣି ଚେଷ୍ଟା କରିବାକୁ Refresh ଟ୍ୟାପ୍ କରନ୍ତୁ।",
+  "Camera list connection lost. Previously loaded cameras are kept; tap Refresh to retry.":
+    "କ୍ୟାମେରା ତାଲିକା ସଂଯୋଗ କଟିଗଲା। ପୂର୍ବରୁ ଲୋଡ୍ ହୋଇଥିବା କ୍ୟାମେରା ରଖାଯାଇଛି; ପୁଣି ଚେଷ୍ଟା କରିବାକୁ Refresh ଟ୍ୟାପ୍ କରନ୍ତୁ।",
+  "A newer snapshot is arriving. The previous matching image and boxes are kept.":
+    "ନୂଆ ସ୍ନାପସଟ୍ ଆସୁଛି। ପୂର୍ବର ମେଳ ଖାଉଥିବା ଫଟୋ ଓ ବକ୍ସ ରଖାଯାଇଛି।",
   "Frame latency": "ଫ୍ରେମ୍ ବିଳମ୍ବ",
   "Phone GPS": "ଫୋନ୍ GPS",
   "Not shared": "ଅଂଶୀଦାର ହୋଇନାହିଁ",

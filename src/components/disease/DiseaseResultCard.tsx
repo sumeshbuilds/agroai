@@ -2,6 +2,8 @@
 
 import {
   Bug,
+  CalendarClock,
+  Camera,
   CheckCircle2,
   FlaskConical,
   Leaf,
@@ -16,9 +18,12 @@ import {
   confidencePercent,
   DISEASE_DISCLAIMER,
   HEALTH_STATUS_META,
+  IMAGE_QUALITY_META,
   PATHOGEN_META,
   plantPartLabel,
   SEVERITY_META,
+  SPREAD_RISK_META,
+  URGENCY_META,
   type DiseaseScanDTO,
 } from "@/lib/disease";
 import { formatDateTime } from "@/lib/format";
@@ -42,7 +47,7 @@ const STATUS_STYLE = {
   },
 } as const;
 
-const SEVERITY_CHIP = {
+const TONE_CHIP = {
   leaf: "chip-brand",
   warn: "chip-warn",
   danger: "chip-danger",
@@ -52,9 +57,11 @@ const SEVERITY_CHIP = {
 export function DiseaseResultCard({
   scan,
   imageUrl,
+  onRetake,
 }: {
   scan: DiseaseScanDTO;
   imageUrl: string;
+  onRetake?: () => void;
 }) {
   const { t } = useI18n();
   const meta = HEALTH_STATUS_META[scan.healthStatus];
@@ -62,21 +69,34 @@ export function DiseaseResultCard({
   const percent = confidencePercent(scan.confidence);
   const severity = SEVERITY_META[scan.severity];
   const pathogen = PATHOGEN_META[scan.pathogenType];
+  const urgency = URGENCY_META[scan.urgency];
+  const spread = SPREAD_RISK_META[scan.spreadRisk];
+  const imageQuality = IMAGE_QUALITY_META[scan.imageQuality];
+  const notPlant = scan.subject === "not_plant";
 
-  const title =
-    scan.healthStatus === "healthy"
+  const title = notPlant
+    ? t("This does not look like a plant")
+    : scan.healthStatus === "healthy"
       ? t("No disease seen in this photo")
       : scan.healthStatus === "uncertain"
         ? scan.diseaseName ??
           t("The photo is not clear enough to name the problem")
         : scan.diseaseName ?? t("Possible plant health problem");
 
-  const StatusIcon =
-    scan.healthStatus === "healthy"
+  const StatusIcon = notPlant
+    ? TriangleAlert
+    : scan.healthStatus === "healthy"
       ? CheckCircle2
       : scan.healthStatus === "diseased"
         ? TriangleAlert
         : Microscope;
+
+  const sourceLabel =
+    scan.source === "gemini+groq"
+      ? t("Gemini + Groq cross-check")
+      : scan.source === "groq"
+        ? t("Groq vision")
+        : t("Gemini vision");
 
   return (
     <article
@@ -95,7 +115,7 @@ export function DiseaseResultCard({
         </span>
         <div className="min-w-0 flex-1">
           <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em] opacity-80">
-            {t(meta.label)}
+            {notPlant ? t("Not a plant photo") : t(meta.label)}
           </p>
           <h2 className="mt-1 text-xl font-semibold leading-tight">{title}</h2>
           <p className="mt-1 text-xs opacity-80">
@@ -115,18 +135,35 @@ export function DiseaseResultCard({
 
       <div className="space-y-5 p-5">
         <div className="flex flex-wrap gap-2">
-          {scan.healthStatus !== "healthy" ? (
+          {scan.healthStatus !== "healthy" && !notPlant ? (
             <span className="chip chip-violet">
               <span aria-hidden>{pathogen.emoji}</span>
               {t(pathogen.label)}
             </span>
           ) : null}
-          <span className={cn("chip", SEVERITY_CHIP[severity.tone])}>
-            {t(severity.label)}
-          </span>
+          {!notPlant ? (
+            <span className={cn("chip", TONE_CHIP[severity.tone])}>
+              {t(severity.label)}
+            </span>
+          ) : null}
+          {scan.healthStatus !== "healthy" && !notPlant ? (
+            <span className={cn("chip", TONE_CHIP[urgency.tone])}>
+              {t(urgency.label)}
+            </span>
+          ) : null}
+          {scan.spreadRisk !== "unknown" && scan.healthStatus !== "healthy" ? (
+            <span className={cn("chip", TONE_CHIP[spread.tone])}>
+              {t(spread.label)}
+            </span>
+          ) : null}
+          {scan.imageQuality !== "unknown" ? (
+            <span className={cn("chip", TONE_CHIP[imageQuality.tone])}>
+              {t(imageQuality.label)}
+            </span>
+          ) : null}
           <span className="chip chip-info">{t(plantPartLabel(scan.plantPart))}</span>
           <span className="chip bg-[var(--card-muted)] text-[var(--color-ink-soft)]">
-            {scan.source === "groq" ? t("Groq vision") : t("Gemini vision")}
+            {sourceLabel}
           </span>
         </div>
 
@@ -168,7 +205,7 @@ export function DiseaseResultCard({
               aria-hidden
             />
           </div>
-          {percent < 45 ? (
+          {percent < 45 && !notPlant ? (
             <p className="mt-2 flex items-start gap-1.5 text-[0.7rem] leading-relaxed text-warn-700">
               <TriangleAlert aria-hidden className="mt-0.5 h-3 w-3 shrink-0" />
               {t(
@@ -177,6 +214,31 @@ export function DiseaseResultCard({
             </p>
           ) : null}
         </div>
+
+        {scan.retakeAdvice ? (
+          <div className="flex items-start gap-2.5 rounded-xl bg-[var(--color-panel)] p-3.5 text-xs leading-relaxed text-[var(--color-ink-soft)] ring-1 ring-inset ring-[var(--color-line)]">
+            <Camera
+              aria-hidden
+              className="mt-0.5 h-4 w-4 shrink-0 text-[var(--color-ink-soft)]"
+            />
+            <div className="min-w-0">
+              <p className="font-semibold text-[var(--color-ink)]">
+                {t("How to get a clearer photo")}
+              </p>
+              <p className="mt-1">{scan.retakeAdvice}</p>
+              {onRetake ? (
+                <button
+                  type="button"
+                  onClick={onRetake}
+                  className="btn btn-secondary mt-2.5 min-h-9 px-3 text-xs"
+                >
+                  <Camera aria-hidden className="h-3.5 w-3.5" />
+                  {t("Take a better photo")}
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
 
         {scan.symptoms.length > 0 ? (
           <ResultSection
@@ -193,6 +255,49 @@ export function DiseaseResultCard({
             items={scan.immediateActions}
             ordered
           />
+        ) : null}
+
+        {scan.differentials.length > 0 ? (
+          <section>
+            <div className="flex items-center gap-2 text-[var(--color-ink-soft)]">
+              <Microscope aria-hidden className="h-3.5 w-3.5" />
+              <h3 className="text-xs font-semibold">{t("Other likely causes")}</h3>
+            </div>
+            <ul className="mt-2 space-y-2.5">
+              {scan.differentials.map((item) => {
+                const itemPercent = confidencePercent(item.confidence);
+                return (
+                  <li key={item.name}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <span className="text-sm font-medium">{item.name}</span>
+                      <span className="text-[0.68rem] tabular-nums text-[var(--color-ink-soft)]">
+                        {itemPercent}%
+                      </span>
+                    </div>
+                    <div
+                      className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--card-muted)]"
+                      role="progressbar"
+                      aria-label={item.name}
+                      aria-valuenow={itemPercent}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className="progress-fill h-full rounded-full bg-[var(--color-ink-soft)]/40"
+                        style={{ transform: `scaleX(${itemPercent / 100})` }}
+                        aria-hidden
+                      />
+                    </div>
+                    {item.note ? (
+                      <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--color-ink-soft)]">
+                        {item.note}
+                      </p>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
         ) : null}
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -232,6 +337,16 @@ export function DiseaseResultCard({
           ) : null}
         </div>
 
+        {scan.monitoring ? (
+          <div className="flex items-start gap-2.5 rounded-xl bg-leaf-100/60 p-3.5 text-xs leading-relaxed text-leaf-700 ring-1 ring-inset ring-leaf-500/20">
+            <CalendarClock aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              <p className="font-semibold">{t("Check the same plant again")}</p>
+              <p className="mt-0.5">{scan.monitoring}</p>
+            </div>
+          </div>
+        ) : null}
+
         {scan.prevention.length > 0 ? (
           <ResultSection
             icon={<ShieldCheck aria-hidden className="h-3.5 w-3.5" />}
@@ -259,9 +374,21 @@ export function DiseaseResultCard({
         ) : null}
       </div>
 
-      <footer className="flex items-start gap-2 border-t border-[var(--color-line)] bg-[var(--color-panel)] px-5 py-3.5 text-[0.68rem] leading-relaxed text-[var(--color-ink-soft)]">
-        <ShieldCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        <p>{t(DISEASE_DISCLAIMER)}</p>
+      <footer className="border-t border-[var(--color-line)] bg-[var(--color-panel)] px-5 py-3.5">
+        <div className="flex items-start gap-2 text-[0.68rem] leading-relaxed text-[var(--color-ink-soft)]">
+          <ShieldCheck aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>{t(DISEASE_DISCLAIMER)}</p>
+        </div>
+        {onRetake ? (
+          <button
+            type="button"
+            onClick={onRetake}
+            className="btn btn-secondary mt-3 min-h-9 px-3 text-xs"
+          >
+            <Camera aria-hidden className="h-3.5 w-3.5" />
+            {t("Scan another plant part")}
+          </button>
+        ) : null}
       </footer>
     </article>
   );

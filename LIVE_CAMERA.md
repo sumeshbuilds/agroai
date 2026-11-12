@@ -113,8 +113,9 @@ Phone /camera
                           │    → relabel species / mark verified / flag for review
                           ▼
 Laptop /watch + dashboard
-  /watch polls the session every ~900 ms; the alarm manager polls
-  /api/camera/alerts every ~3 s (8 s while the tab is hidden)
+  /watch polls the session every ~1.5 s (4 s on slow links, backing off on
+  failures); the alarm manager polls /api/camera/alerts every ~3 s
+  (8 s while the tab is hidden)
   <img> = latest frame (versioned, cached)
   boxes/trails drawn as an overlay from latestDetections
   one persistent popup per unread alarm + continuous siren until stopped
@@ -123,9 +124,13 @@ Laptop /watch + dashboard
 ### Why it feels live
 
 - Frames are versioned with `?v=<timestamp>` and cached, so the browser only
-  downloads a new image when the phone sends one.
-- The player polls at ~900 ms; the phone uploads every 0.7 s while something is
-  moving (2.6 s when idle). Expected glass-to-glass latency is **1.5–2.5 s**.
+  downloads a new image when the phone sends one. Hidden tabs poll metadata
+  only, so an idle dashboard does not keep downloading JPEGs.
+- The player polls at ~1.5 s (4 s on a slow link) and backs off exponentially
+  when metadata/frame requests fail. The phone uploads every 0.7 s while
+  something is moving (2.6 s when idle) on a good link, and stretches the gap
+  automatically when measured upload time or failures require it. Expected
+  glass-to-glass latency is **1.5–2.5 s** on a normal connection.
 - Inference runs on a 416 px copy and only every 350 ms when there is movement,
   so the phone keeps ~25–30 fps for the preview instead of stuttering.
 - Boxes animate between positions with a 300 ms CSS transition, so movement looks
@@ -134,9 +139,11 @@ Laptop /watch + dashboard
 ### Why it is private / low-bandwidth
 
 - Raw video never leaves the phone.
-- Frames shrink to 320–560 px and quality 0.5–0.65 on weak links; a typical frame
-  is ~20–60 KB. On `saveData`, `2g` or `slow-2g` the phone uploads less often
-  (1.4 s active / 6.5 s idle).
+- Frames shrink to 320–560 px and quality 0.34–0.65 on weak links; a typical
+  frame is ~20–60 KB. On `saveData`, `2g`, `slow-2g`, a measured upload over
+  2.5 s or a failed attempt, the phone switches to the smaller/cheaper frame and
+  stretches the upload interval (up to ~30 s) instead of saturating the link.
+  A hung upload is aborted after 14–25 s, then retried with exponential backoff.
 - JPEGs are posted as `multipart/form-data`, not base64, saving ~33 % bandwidth.
 - Only the newest frame is stored per session. Detections are one row per
   **confirmed** human/animal, not per frame.

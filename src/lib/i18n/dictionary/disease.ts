@@ -22,8 +22,8 @@ export const DISEASE: Record<string, string> = {
   "Use daylight and fill the frame with the affected part.":
     "ଦିନର ଆଲୋକ ବ୍ୟବହାର କରନ୍ତୁ ଏବଂ ପ୍ରଭାବିତ ଅଂଶକୁ ଫ୍ରେମ୍‌ରେ ପୂର୍ଣ୍ଣ କରନ୍ତୁ।",
   "Preparing photo…": "ଫଟୋ ପ୍ରସ୍ତୁତ ହେଉଛି…",
-  "Reading the plant… this can take up to 30 seconds.":
-    "ଗଛ ପଢ଼ାଯାଉଛି… ଏଥିରେ ୩୦ ସେକେଣ୍ଡ ପର୍ଯ୍ୟନ୍ତ ସମୟ ଲାଗିପାରେ।",
+  "Reading the plant… this can take up to 45 seconds.":
+    "ଗଛ ପଢ଼ାଯାଉଛି… ଏଥିରେ ୪୫ ସେକେଣ୍ଡ ପର୍ଯ୍ୟନ୍ତ ସମୟ ଲାଗିପାରେ।",
   "Crop (optional)": "ଫସଲ (ଇଚ୍ଛାଧୀନ)",
   "Not sure / other": "ନିଶ୍ଚିତ ନୁହେଁ / ଅନ୍ୟ",
   "Your crops": "ଆପଣଙ୍କ ଫସଲ",
@@ -124,4 +124,45 @@ export const DISEASE: Record<string, string> = {
     "ଏହା ଏକ AI ଦୃଶ୍ୟ ଯାଞ୍ଚ, ଲାବୋରେଟୋରୀ ପରୀକ୍ଷା ନୁହେଁ। କୀଟନାଶକରେ ଖର୍ଚ୍ଚ କରିବା ପୂର୍ବରୁ ସ୍ଥାନୀୟ କୃଷି ଅଧିକାରୀ କିମ୍ବା KVK ସହ ନିଶ୍ଚିତ କରନ୍ତୁ।",
   "Deleting…": "ଡିଲିଟ୍ ହେଉଛି…",
   "Scan a leaf": "ପତ୍ର ସ୍କାନ୍ କରନ୍ତୁ",
+
+  /* Quality + second opinion */
+  "This photo may be too weak for a reliable scan":
+    "ଏହି ଫଟୋ ନିର୍ଭରଯୋଗ୍ୟ ସ୍କାନ୍ ପାଇଁ ଯଥେଷ୍ଟ ଭଲ ନହୋଇପାରେ",
+  "Photo quality tip": "ଫଟୋ ଗୁଣବତ୍ତା ସୂଚନା",
+  "How to get a clearer photo": "ଅଧିକ ସ୍ପଷ୍ଟ ଫଟୋ କିପରି ପାଇବେ",
+  "Take a better photo": "ଭଲ ଫଟୋ ନିଅନ୍ତୁ",
+  "Scan another plant part": "ଅନ୍ୟ ଗଛ ଅଂଶ ସ୍କାନ୍ କରନ୍ତୁ",
+  "Scan this photo anyway": "ତଥାପି ଏହି ଫଟୋ ସ୍କାନ୍ କରନ୍ତୁ",
+  "This does not look like a plant": "ଏହା ଗଛ ପରି ଦେଖାଯାଉନାହିଁ",
+  "Not a plant photo": "ଗଛର ଫଟୋ ନୁହେଁ",
+  "Other likely causes": "ଅନ୍ୟ ସମ୍ଭାବ୍ୟ କାରଣ",
+  "Check the same plant again": "ସେହି ଗଛକୁ ପୁଣି ଯାଞ୍ଚ କରନ୍ତୁ",
+  "Gemini + Groq cross-check": "Gemini + Groq ଦ୍ୱିତୀୟ ଯାଞ୍ଚ",
+  "Clear and sharp": "ସ୍ପଷ୍ଟ ଓ ତୀକ୍ଷ୍ଣ",
+  "Usable photo": "ବ୍ୟବହାରଯୋଗ୍ୟ ଫଟୋ",
+  "Unclear photo": "ଅସ୍ପଷ୍ଟ ଫଟୋ",
+  "Photo quality not checked": "ଫଟୋ ଗୁଣବତ୍ତା ଯାଞ୍ଚ ହୋଇନାହିଁ",
+  "Low spread risk": "ବ୍ୟାପିବାର କମ୍ ଆଶଙ୍କା",
+  "Can spread — isolate it": "ବ୍ୟାପିପାରେ — ଅଲଗା ରଖନ୍ତୁ",
+  "Spreads fast — act now": "ଶୀଘ୍ର ବ୍ୟାପେ — ଏବେ କାର୍ଯ୍ୟ କରନ୍ତୁ",
+  "Spread risk unclear": "ବ୍ୟାପିବାର ଆଶଙ୍କା ସ୍ପଷ୍ଟ ନୁହେଁ",
+  "Watch and re-check": "ନଜର ରଖନ୍ତୁ ଓ ପୁଣି ଯାଞ୍ଚ କରନ୍ତୁ",
+  "Act within 2–3 days": "୨–୩ ଦିନ ମଧ୍ୟରେ କାର୍ଯ୍ୟ କରନ୍ତୁ",
+  "Act today": "ଆଜି ହିଁ କାର୍ଯ୍ୟ କରନ୍ତୁ",
+  "Plant photo": "ଗଛର ଫଟୋ",
+  "Photo subject unclear": "ଫଟୋର ବିଷୟ ସ୍ପଷ୍ଟ ନୁହେଁ",
+  "This photo is too dark. Move into daylight and try again.":
+    "ଏହି ଫଟୋ ବହୁତ ଅନ୍ଧାର। ଦିନର ଆଲୋକକୁ ଆସି ପୁଣି ଚେଷ୍ଟା କରନ୍ତୁ।",
+  "This photo is overexposed. Avoid direct glare or flash.":
+    "ଏହି ଫଟୋ ଅତି ଉଜ୍ଜ୍ୱଳ। ସିଧା ସୂର୍ଯ୍ୟାଲୋକ କିମ୍ବା ଫ୍ଲାସ୍ ଏଡ଼ାନ୍ତୁ।",
+  "This photo looks blurry. Hold still and let the camera focus.":
+    "ଏହି ଫଟୋ ଅସ୍ପଷ୍ଟ ଦେଖାଯାଉଛି। ସ୍ଥିର ରହନ୍ତୁ ଓ କ୍ୟାମେରାକୁ ଫୋକସ୍ କରିବାକୁ ଦିଅନ୍ତୁ।",
+  "The photo is a little dark — daylight will give a clearer result.":
+    "ଫଟୋ ଟିକେ ଅନ୍ଧାର — ଦିନର ଆଲୋକରେ ଅଧିକ ସ୍ପଷ୍ଟ ଫଳାଫଳ ମିଳିବ।",
+  "The photo is very bright — shade the leaf from direct sun.":
+    "ଫଟୋ ବହୁତ ଉଜ୍ଜ୍ୱଳ — ପତ୍ରକୁ ସିଧା ରୋଦରୁ ଛାୟା କରନ୍ତୁ।",
+  "The photo is slightly soft. Get closer and hold the phone steady.":
+    "ଫଟୋ ଟିକେ ଅସ୍ପଷ୍ଟ। ପାଖକୁ ଯାଇ ଫୋନ୍ ସ୍ଥିର ରଖନ୍ତୁ।",
+  "The photo is low resolution. Move closer so the affected part fills the frame.":
+    "ଫଟୋର ରିଜୋଲ୍ୟୁସନ୍ କମ୍। ପ୍ରଭାବିତ ଅଂଶ ଫ୍ରେମ୍ରେ ପୂର୍ଣ୍ଣ ହେବା ପର୍ଯ୍ୟନ୍ତ ପାଖକୁ ଯାଆନ୍ତୁ।",
 };

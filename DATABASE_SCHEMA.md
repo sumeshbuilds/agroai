@@ -1,11 +1,12 @@
 # AgroAI - Neon Postgres Database Schema
 
-> **Current as of 10 Nov 2026.** The old `intrusion_alerts` table (simulated
+> **Current as of 12 Nov 2026.** The old `intrusion_alerts` table (simulated
 > predator/fire alerts) was removed in migration
 > `0003_remove_simulated_alerts.sql`. Live detections live in
 > `camera_detections`, and confirmed human/animal events raise rows in
 > `camera_alerts` (migration `0004_first_wolfsbane.sql`). Plant-photo diagnosis
-> history lives in `disease_scans` (migration `0005_greedy_thor_girl.sql`).
+> history lives in `disease_scans` (migrations `0005_greedy_thor_girl.sql` and
+> `0006_disease_scan_context.sql`).
 
 ## 1. Drizzle ORM Schema (`src/db/schema.ts`)
 
@@ -144,9 +145,14 @@ export const diseaseScans = pgTable('disease_scans', {
   imageMime: text('image_mime').notNull().default('image/jpeg'),
   imageData: text('image_data').notNull(), // base64 JPEG/PNG/WebP
   healthStatus: text('health_status').notNull(), // healthy | diseased | uncertain
+  subject: text('subject').notNull().default('plant'), // plant | not_plant | unclear
+  imageQuality: text('image_quality').notNull().default('unknown'), // good | fair | poor | unknown
+  retakeAdvice: text('retake_advice'), // plain-language photo guidance
   diseaseName: text('disease_name'),
   pathogenType: text('pathogen_type').notNull().default('unknown'),
   severity: text('severity').notNull().default('unknown'), // none | low | moderate | high | unknown
+  spreadRisk: text('spread_risk').notNull().default('unknown'), // low | moderate | high | unknown
+  urgency: text('urgency').notNull().default('monitor'), // monitor | act_soon | act_now
   confidence: doublePrecision('confidence').notNull().default(0), // 0–1
   summary: text('summary').notNull().default(''),
   symptoms: jsonb('symptoms').notNull(), // string[]
@@ -156,7 +162,9 @@ export const diseaseScans = pgTable('disease_scans', {
   chemicalTreatment: jsonb('chemical_treatment').notNull(),
   prevention: jsonb('prevention').notNull(),
   lookAlikes: jsonb('look_alikes').notNull(),
-  source: text('source').notNull().default('gemini'), // gemini | groq
+  differentials: jsonb('differentials').notNull().default([]), // {name, confidence, note}[]
+  monitoring: text('monitoring'), // when to re-inspect the plant
+  source: text('source').notNull().default('gemini'), // gemini | groq | gemini+groq
   model: text('model'),
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
@@ -190,6 +198,7 @@ camera session for the “Field context” panel.
 | `0003_remove_simulated_alerts.sql` | Drops the old `intrusion_alerts` table. |
 | `0004_first_wolfsbane.sql` | Adds `camera_alerts`; adds `confirmed` / `source` / `verified` to `camera_detections`. |
 | `0005_greedy_thor_girl.sql` | Creates `disease_scans` (photo + AI verdict + farmer index) with FKs to `farmers` and `crops`. |
+| `0006_disease_scan_context.sql` | Adds photo-quality/subject, retake advice, spread risk, urgency, differentials and monitoring to `disease_scans`. |
 
 Apply with `npm run db:push` (uses the direct `DATABASE_URL_UNPOOLED`
 connection). `drizzle-kit generate` produces SQL; never migrate over the pooled
@@ -214,12 +223,23 @@ PgBouncer connection.
 
 - One row per photo, scoped by `farmer_id`; the image bytes and delete endpoint
   are only reachable through the signed-in session.
-- The browser downscales the long edge to 1000 px and re-encodes JPEG; the server
-  also checks the magic bytes, rejects anything over 2.5 MB, and accepts only
-  JPEG/PNG/WebP.
+- The browser downscales the long edge to 1280 px, re-encodes JPEG, and checks
+  average brightness plus Laplacian variance to warn about blurry, dark or
+  low-resolution photos. The server also checks the magic bytes, rejects anything
+  over 2.5 MB, and accepts only JPEG/PNG/WebP.
+- The AI prompt receives the crop's growth stage, stage-specific known threats
+  and a best-effort 3-day weather summary (2.5 s timeout). Weather never blocks a
+  scan; it is dropped from the prompt when Open-Meteo is slow.
+- When the first read is uncertain, low-confidence or photo-limited, and a
+  `GROQ_API_KEY` exists, Groq reads the same photo as an independent second
+  opinion (capped at 12 s). Agreement raises confidence; disagreement keeps the
+  stronger diagnosis with lower confidence and lists the other as a differential.
+  Set `DISEASE_SECOND_OPINION=false` to skip this cross-check.
 - No scan is written when the AI provider is missing, times out or returns
   unreadable JSON. The API returns `502 DISEASE_AI_UNAVAILABLE` instead.
 - `confidence` is normalised to 0–1 (an `86` reply becomes `0.86`) and the UI
-  shows a "take a closer photo" warning below 45%.
+  shows a "take a closer photo" warning below 45%. A `diseased` reply below 0.40
+  is downgraded to `uncertain`; a non-plant subject can never keep a disease name.
+- `source` is `gemini`, `groq` or `gemini+groq` (second-opinion cross-check).
 - Deleting a scan removes the row and its stored image immediately; deleting a
   crop only sets `crop_id` to null so the diagnosis history survives.

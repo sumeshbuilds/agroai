@@ -10,6 +10,8 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:camera": "tsx --test tests/camera/*.test.ts",
+    "test:disease": "tsx --test tests/disease/*.test.ts",
+    "test": "npm run test:camera && npm run test:disease",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

@@ -87,7 +87,7 @@ export interface CameraSessionDTO {
   name: string;
   token: string;
   status: CameraSessionStatus;
-  /** True when a frame arrived in the last ~12 seconds. */
+  /** True when a frame arrived in the last ~45 seconds (tolerates weak links). */
   isLive: boolean;
   aiEnabled: boolean;
   deviceLabel: string | null;
@@ -193,8 +193,12 @@ export interface CameraStats {
   moving: number;
 }
 
-/** Frames older than this make a session look offline. */
-export const LIVE_WINDOW_MS = 15_000;
+/**
+ * Frames older than this make a session look offline. This is deliberately
+ * generous: a phone on a weak link can upload every 20–30 s, and the dashboard
+ * should still show it as connected instead of flapping between live/offline.
+ */
+export const LIVE_WINDOW_MS = 45_000;
 
 /**
  * Tracker confirmation thresholds. A track must be seen this many times with a

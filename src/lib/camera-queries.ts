@@ -519,7 +519,7 @@ export async function ingestCameraFrame(
     alerts.push(...seen.flatMap((row) => row.alert && !row.alert.acknowledgedAt ? [row.alert] : []));
   }
 
-  await db
+  const updatedRows = await db
     .update(cameraSessions)
     .set({
       status: "live",
@@ -545,16 +545,40 @@ export async function ingestCameraFrame(
       ...(lat !== null ? { lat } : {}),
       ...(lng !== null ? { lng } : {}),
     })
-    .where(and(eq(cameraSessions.id, session.id), ne(cameraSessions.status, "ended")));
+    .where(and(eq(cameraSessions.id, session.id), ne(cameraSessions.status, "ended")))
+    // Return the updated metadata in the same round trip. The JPEG is
+    // deliberately omitted: the phone only needs the new version, and moving
+    // the base64 frame out of Postgres would slow every upload down.
+    .returning({
+      id: cameraSessions.id,
+      farmerId: cameraSessions.farmerId,
+      name: cameraSessions.name,
+      token: cameraSessions.token,
+      status: cameraSessions.status,
+      aiEnabled: cameraSessions.aiEnabled,
+      deviceLabel: cameraSessions.deviceLabel,
+      lat: cameraSessions.lat,
+      lng: cameraSessions.lng,
+      frameUpdatedAt: cameraSessions.frameUpdatedAt,
+      frameWidth: cameraSessions.frameWidth,
+      frameHeight: cameraSessions.frameHeight,
+      latestDetections: cameraSessions.latestDetections,
+      motion: cameraSessions.motion,
+      totalDetections: cameraSessions.totalDetections,
+      startedAt: cameraSessions.startedAt,
+      lastSeenAt: cameraSessions.lastSeenAt,
+      endedAt: cameraSessions.endedAt,
+      createdAt: cameraSessions.createdAt,
+    });
 
-  const refreshed = await db
-    .select(cameraSessionMetadataColumns)
-    .from(cameraSessions)
-    .where(eq(cameraSessions.id, session.id))
-    .limit(1);
+  // A stop can win the race with this update. Fall back to the session the
+  // route loaded so the caller still sees the final "ended" status.
+  const finalSession: CameraSession = updatedRows[0]
+    ? { ...updatedRows[0], latestFrame: null }
+    : session;
 
   return {
-    session: toCameraSessionDTO(refreshed[0] ?? session),
+    session: toCameraSessionDTO(finalSession),
     newDetections: inserted.map(toDetectionDTO),
     newAlerts: alerts.map((alert) => toAlertDTO(alert, session.name)),
     verification,

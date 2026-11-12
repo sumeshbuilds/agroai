@@ -80,6 +80,7 @@ const num = (value: unknown): number | null =>
 export async function fetchWeather(
   latitude: number,
   longitude: number,
+  options: { signal?: AbortSignal } = {},
 ): Promise<WeatherSnapshot> {
   const params = new URLSearchParams({
     latitude: latitude.toFixed(5),
@@ -97,6 +98,7 @@ export async function fetchWeather(
   try {
     response = await fetch(`${OPEN_METEO_ENDPOINT}?${params.toString()}`, {
       headers: { Accept: "application/json" },
+      signal: options.signal,
     });
   } catch (cause) {
     // Connection errors (e.g. `fetch failed`, connect timeouts) must surface as

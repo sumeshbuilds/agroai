@@ -47,13 +47,18 @@ import {
   type CameraFrameSnapshot, type LuminanceSample,
 } from "@/lib/camera-capture";
 import { CameraEventBuffer } from "@/lib/camera-event-buffer";
+import {
+  isDegradedLink,
+  uploadCadenceMs,
+  uploadTimeoutMs,
+} from "@/lib/camera-link";
 import { estimateCameraMotion, STILL_CAMERA } from "@/lib/camera-motion";
 import { cameraCandidates, CameraTracker, distantScanRegions, suppressDuplicateDetections } from "@/lib/camera-tracker";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useI18n } from "@/lib/i18n";
 
 type AiState = "idle" | "loading" | "ready" | "unavailable";
-type UploadState = "idle" | "ok" | "error" | "stopped";
+type UploadState = "idle" | "ok" | "error" | "offline" | "stopped";
 
 interface GeoState {
   lat: number;
@@ -77,6 +82,7 @@ interface NetworkProfile {
   saveData: boolean;
   effectiveType: string;
   slow: boolean;
+  online: boolean;
 }
 
 interface ConnectionLike {
@@ -108,7 +114,7 @@ function deviceLabel(): string {
 
 function networkProfile(): NetworkProfile {
   if (typeof navigator === "undefined") {
-    return { saveData: false, effectiveType: "", slow: false };
+    return { saveData: false, effectiveType: "", slow: false, online: true };
   }
   const connection = (
     navigator as Navigator & { connection?: ConnectionLike }
@@ -118,7 +124,7 @@ function networkProfile(): NetworkProfile {
   const slow =
     saveData || effectiveType === "slow-2g" || effectiveType === "2g";
 
-  return { saveData, effectiveType, slow };
+  return { saveData, effectiveType, slow, online: navigator.onLine !== false };
 }
 
 export function CameraStreamView() {
@@ -160,6 +166,7 @@ export function CameraStreamView() {
   const detectionFailuresRef = useRef(0);
   const opticsVersionRef = useRef(0);
   const uploadMsRef = useRef(0);
+  const uploadFailuresRef = useRef(0);
   const lastUploadedSnapshotRef = useRef<CameraFrameSnapshot | null>(null);
   const distantScanRef = useRef(false);
   const cameraMovingRef = useRef(false);
@@ -213,9 +220,12 @@ export function CameraStreamView() {
   const [cameraMoving, setCameraMoving] = useState(false);
   const [backlog, setBacklog] = useState(0);
   const [elapsed, setElapsed] = useState(0);
-  const [network, setNetwork] = useState<NetworkProfile>(() =>
-    networkProfile(),
-  );
+  const [network, setNetwork] = useState<NetworkProfile>(() => ({
+    saveData: false,
+    effectiveType: "",
+    slow: false,
+    online: true,
+  }));
 
   const isEnded = pairing?.session.status === "ended";
   const linkError =
@@ -266,11 +276,17 @@ export function CameraStreamView() {
     const connection = (
       navigator as Navigator & { connection?: ConnectionLike }
     ).connection;
-    if (!connection?.addEventListener) return;
 
     const update = () => setNetwork(networkProfile());
-    connection.addEventListener("change", update);
-    return () => connection.removeEventListener?.("change", update);
+    update();
+    connection?.addEventListener?.("change", update);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      connection?.removeEventListener?.("change", update);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
   }, []);
 
   // ---- AI model ----------------------------------------------------------
@@ -469,6 +485,8 @@ export function CameraStreamView() {
         snapshotRef.current = null;
         motionRef.current = 0;
         detectionFailuresRef.current = 0;
+        uploadFailuresRef.current = 0;
+        uploadMsRef.current = 0;
         startedAtRef.current = performance.now();
         setStarted(true);
         setElapsed(0);
@@ -660,7 +678,16 @@ export function CameraStreamView() {
       snapshotRef.current = snapshot;
       detectionFailuresRef.current = 0;
 
-      if (eventBufferRef.current.enqueue(snapshot, networkProfile().slow, deviceLabel())) {
+      const profile = networkProfile();
+      const backlog = eventBufferRef.current.size;
+      const degraded =
+        backlog >= 4 ||
+        isDegradedLink({
+          slow: profile.slow,
+          uploadMs: uploadMsRef.current,
+          failures: uploadFailuresRef.current,
+        });
+      if (eventBufferRef.current.enqueue(snapshot, degraded, deviceLabel())) {
         setBacklog(eventBufferRef.current.size);
       }
     } catch {
@@ -702,26 +729,48 @@ export function CameraStreamView() {
   // ---- payload + upload --------------------------------------------------
   const uploadFrame = useCallback(async () => {
     if (!token || !runningRef.current || uploadBusyRef.current || document.visibilityState !== "visible") return;
+
+    const profile = networkProfile();
+    if (!profile.online) {
+      // Do not hammer a dead link. Detection stays local and confirmed events
+      // remain in the buffer; the online handler wakes this loop immediately.
+      setUploadState("offline");
+      setUploadError(null);
+      return;
+    }
+
     const generation = generationRef.current;
     const accept = () => activeRef.current && runningRef.current && generation === generationRef.current;
     uploadBusyRef.current = true;
     const controller = new AbortController();
     uploadControllerRef.current = controller;
-    const profile = networkProfile();
-    const timeout = window.setTimeout(() => controller.abort(), profile.slow ? 30_000 : 20_000);
+    const degraded = isDegradedLink({
+      slow: profile.slow,
+      uploadMs: uploadMsRef.current,
+      failures: uploadFailuresRef.current,
+    });
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      uploadTimeoutMs({ slow: degraded, uploadMs: uploadMsRef.current }),
+    );
     const start = performance.now();
     let phase: "encode" | "upload" = "encode";
+    let succeeded = false;
     try {
       const queued = eventBufferRef.current.size > 0;
       const snapshot = aiReadyRef.current ? snapshotRef.current : captureSnapshot();
       if (!queued && (!snapshot || snapshot === lastUploadedSnapshotRef.current)) return;
-      const frame = queued ? await eventBufferRef.current.next(controller.signal) : await encodeCameraFrame(snapshot!, profile.slow, deviceLabel(), { signal: controller.signal });
+      const frame = queued
+        ? await eventBufferRef.current.next(controller.signal)
+        : await encodeCameraFrame(snapshot!, degraded, deviceLabel(), { signal: controller.signal });
       if (!accept() || !frame) return;
       controller.signal.throwIfAborted();
       phase = "upload";
       const response = await api.postCameraFrameMultipart(token, frame.meta, frame.blob, { signal: controller.signal });
       if (!accept()) return;
       controller.signal.throwIfAborted();
+      succeeded = true;
+      uploadFailuresRef.current = 0;
       if (queued) eventBufferRef.current.complete(frame);
       else if (snapshot) lastUploadedSnapshotRef.current = snapshot;
       setBacklog(eventBufferRef.current.size);
@@ -745,19 +794,29 @@ export function CameraStreamView() {
       }
     } catch (cause) {
       if (!accept()) return;
-      if (cause instanceof ApiError && (cause.code === "STREAM_STOPPED" || cause.status === 404)) {
+      if (!navigator.onLine) {
+        setUploadState("offline");
+        setUploadError(null);
+      } else if (cause instanceof ApiError && (cause.code === "STREAM_STOPPED" || cause.status === 404)) {
         stopCamera();
         setStoppedByServer(true);
         setUploadState("stopped");
       } else {
+        uploadFailuresRef.current = Math.min(6, uploadFailuresRef.current + 1);
         setUploadState("error");
         setUploadError(phase === "encode" && !controller.signal.aborted
           ? "Could not encode the camera image. Saved event frames will be retried; detection is still active."
-          : controller.signal.aborted ? "Frame upload timed out. Confirmed event frames are queued for retry." : "Frame upload failed. Confirmed event frames are queued for retry.");
+          : controller.signal.aborted
+            ? "Frame upload timed out. The camera will retry with a smaller frame; confirmed events stay queued."
+            : "Frame upload failed. The camera will retry with a smaller frame; confirmed events stay queued.");
       }
     } finally {
       window.clearTimeout(timeout);
-      uploadMsRef.current = performance.now() - start;
+      const elapsed = performance.now() - start;
+      // A timed-out/failed attempt says little about the link's true capacity
+      // (the server may have been down). Cap it so the next retry is not
+      // delayed by the full timeout; failures drive the real backoff.
+      uploadMsRef.current = succeeded ? elapsed : Math.min(elapsed, 5_000);
       if (uploadControllerRef.current === controller) uploadControllerRef.current = null;
       uploadBusyRef.current = false;
     }
@@ -806,7 +865,14 @@ export function CameraStreamView() {
       const profile = networkProfile();
       const active = trackerRef.current.size > 0 || eventBufferRef.current.size > 0;
       const base = profile.slow ? active ? UPLOAD_INTERVAL_SLOW : IDLE_UPLOAD_INTERVAL_SLOW : active ? UPLOAD_INTERVAL_ACTIVE : UPLOAD_INTERVAL_IDLE;
-      const cadence = Math.max(base, uploadMsRef.current * 1.25);
+      const cadence = profile.online
+        ? uploadCadenceMs({
+            baseIntervalMs: base,
+            uploadMs: uploadMsRef.current,
+            failures: uploadFailuresRef.current,
+            slow: profile.slow,
+          })
+        : 3_000;
       uploadTimer = window.setTimeout(() => void upload(), Math.max(200, cadence - (performance.now() - start)));
     };
     detectTimer = window.setTimeout(() => void detect(), 0);
@@ -819,14 +885,27 @@ export function CameraStreamView() {
       prevLumRef.current = null;
       previousDetectionLumRef.current = null;
       trackerRef.current.ignoreNextMotion();
+      uploadFailuresRef.current = 0;
+      setNetwork(networkProfile());
       void acquireWakeLock(generation);
       void videoRef.current?.play().catch(() => undefined);
       // Wake pending timers without starting overlapping inference/requests.
       if (!detectBusyRef.current) { window.clearTimeout(detectTimer); void detect(); }
       if (!uploadBusyRef.current) { window.clearTimeout(uploadTimer); void upload(); }
     };
+    const onOnline = () => {
+      setNetwork(networkProfile());
+      uploadFailuresRef.current = 0;
+      if (!alive() || document.visibilityState !== "visible") return;
+      if (!uploadBusyRef.current) { window.clearTimeout(uploadTimer); void upload(); }
+    };
+    const onOffline = () => {
+      setNetwork(networkProfile());
+      if (alive()) setUploadState("offline");
+    };
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", onVisible);
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
     return () => {
       stopped = true;
       window.clearTimeout(detectTimer);
@@ -835,7 +914,8 @@ export function CameraStreamView() {
       window.clearInterval(displayTimer);
       window.clearInterval(clockTimer);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", onVisible);
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
     };
   }, [started, acquireWakeLock, runDetection, sampleMotion, uploadFrame, syncDisplay]);
 
@@ -1006,13 +1086,15 @@ export function CameraStreamView() {
     };
   }, [aiState, t]);
 
-  const qualityLabel = network.slow
-    ? network.saveData
-      ? t("Data saver")
-      : t("2G")
-    : network.effectiveType
-      ? network.effectiveType.toUpperCase()
-      : t("Auto");
+  const qualityLabel = !network.online
+    ? t("Offline")
+    : network.slow
+      ? network.saveData
+        ? t("Data saver")
+        : t("2G")
+      : network.effectiveType
+        ? network.effectiveType.toUpperCase()
+        : t("Auto");
 
   return (
     <main className="camera-surface min-h-dvh bg-slate-950 text-slate-100">
@@ -1113,6 +1195,20 @@ export function CameraStreamView() {
                 )}
               </li>
             </ol>
+          </div>
+        ) : null}
+
+        {!network.online ? (
+          <div role="status" className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-3.5 text-sm leading-relaxed text-sky-100">
+            <p className="flex items-center gap-2 font-semibold">
+              <WifiOff aria-hidden className="h-4 w-4" />
+              {t("Phone is offline")}
+            </p>
+            <p className="mt-1">
+              {t(
+                "Detection keeps running on this phone. Confirmed event frames stay queued and upload automatically when the connection returns; the live preview pauses until then.",
+              )}
+            </p>
           </div>
         ) : null}
 
@@ -1265,7 +1361,7 @@ export function CameraStreamView() {
               />
               <Stat
                 icon={
-                  uploadState === "error" ? (
+                  uploadState === "error" || uploadState === "offline" ? (
                     <WifiOff className="h-3.5 w-3.5" />
                   ) : (
                     <Wifi className="h-3.5 w-3.5" />
@@ -1273,13 +1369,19 @@ export function CameraStreamView() {
                 }
                 label={t("Upload")}
                 value={
-                  uploadState === "error"
-                    ? t("Retrying")
-                    : uploadState === "ok"
-                      ? t("Receiving")
-                      : t("Starting")
+                  uploadState === "offline"
+                    ? t("Offline")
+                    : uploadState === "error"
+                      ? t("Retrying")
+                      : uploadState === "ok"
+                        ? t("Receiving")
+                        : t("Starting")
                 }
-                tone={uploadState === "error" ? "danger" : "default"}
+                tone={
+                  uploadState === "error" || uploadState === "offline"
+                    ? "danger"
+                    : "default"
+                }
               />
               <Stat
                 icon={<Zap className="h-3.5 w-3.5" />}

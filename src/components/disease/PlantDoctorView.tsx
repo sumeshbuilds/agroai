@@ -39,7 +39,7 @@ import {
 } from "@/lib/disease";
 import { useFarms } from "@/lib/hooks/use-farms";
 import { useI18n } from "@/lib/i18n";
-import { prepareScanImage } from "@/lib/image";
+import { prepareScanImage, type PhotoQuality } from "@/lib/image";
 import type { CropDTO } from "@/lib/types";
 
 interface PhotoState {
@@ -47,6 +47,7 @@ interface PhotoState {
   previewUrl: string;
   width: number;
   height: number;
+  quality: PhotoQuality;
 }
 
 const TIP_KEYS = [
@@ -229,6 +230,17 @@ export function PlantDoctorView({
     setResultImage(null);
     setError(null);
     setNotice(null);
+  };
+
+  /** "Take a better photo" from a result: clear it and reopen the camera. */
+  const retakePhoto = () => {
+    if (busy) return;
+    setPhoto(null);
+    setResult(null);
+    setResultImage(null);
+    setError(null);
+    setNotice(null);
+    window.setTimeout(() => cameraInputRef.current?.click(), 80);
   };
 
   const openCamera = () => {
@@ -498,11 +510,33 @@ export function PlantDoctorView({
                 <p className="text-sm font-semibold">
                   {preparing
                     ? t("Preparing photo…")
-                    : t("Reading the plant… this can take up to 30 seconds.")}
+                    : t("Reading the plant… this can take up to 45 seconds.")}
                 </p>
               </div>
             ) : null}
           </div>
+
+          {photo && photo.quality.issue && photo.quality.label !== "good" ? (
+            <div
+              role="status"
+              className={cn(
+                "flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs leading-relaxed ring-1 ring-inset",
+                photo.quality.label === "poor"
+                  ? "bg-danger-100 text-danger-700 ring-danger-500/20"
+                  : "bg-warn-100 text-warn-700 ring-warn-500/20",
+              )}
+            >
+              <TriangleAlert aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <div className="min-w-0">
+                <p className="font-semibold">
+                  {photo.quality.label === "poor"
+                    ? t("This photo may be too weak for a reliable scan")
+                    : t("Photo quality tip")}
+                </p>
+                <p className="mt-0.5">{t(photo.quality.issue)}</p>
+              </div>
+            </div>
+          ) : null}
 
           <div className="flex flex-wrap gap-2">
             <Button
@@ -624,7 +658,9 @@ export function PlantDoctorView({
               className="w-full"
             >
               <Sparkles aria-hidden className="h-4 w-4" />
-              {t("Ask the plant doctor")}
+              {photo?.quality.label === "poor"
+                ? t("Scan this photo anyway")
+                : t("Ask the plant doctor")}
             </Button>
             <p className="muted text-center text-[0.68rem] leading-relaxed">
               {t("This photo is private to your account.")}{" "}
@@ -640,7 +676,11 @@ export function PlantDoctorView({
         {/* ---------------------------------------------------------------- */}
         <div ref={resultRef} className="scroll-mt-6 space-y-4">
           {result && shownImage ? (
-            <DiseaseResultCard scan={result} imageUrl={shownImage} />
+            <DiseaseResultCard
+              scan={result}
+              imageUrl={shownImage}
+              onRetake={retakePhoto}
+            />
           ) : (
             <section className="card p-5 sm:p-6">
               <div className="flex items-center gap-2.5">

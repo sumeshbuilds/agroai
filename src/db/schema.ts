@@ -11,7 +11,16 @@ import {
 } from "drizzle-orm/pg-core";
 
 import type { DetectionBox, FrameDetection } from "@/lib/camera";
-import type { DiseaseSeverity, DiseaseHealthStatus, PathogenType } from "@/lib/disease";
+import type {
+  DifferentialDiagnosis,
+  DiseaseHealthStatus,
+  DiseaseSeverity,
+  DiseaseSubject,
+  DiseaseUrgency,
+  ImageQuality as DiseaseImageQuality,
+  PathogenType,
+  SpreadRisk,
+} from "@/lib/disease";
 import type { GeoPoint } from "@/lib/types";
 
 // 1. Farmers / Users Table
@@ -189,9 +198,17 @@ export const diseaseScans = pgTable(
     /** Base64 JPEG/PNG bytes without the `data:` prefix. */
     imageData: text("image_data").notNull(),
     healthStatus: text("health_status").$type<DiseaseHealthStatus>().notNull(),
+    subject: text("subject").$type<DiseaseSubject>().notNull().default("plant"),
+    imageQuality: text("image_quality")
+      .$type<DiseaseImageQuality>()
+      .notNull()
+      .default("unknown"),
+    retakeAdvice: text("retake_advice"),
     diseaseName: text("disease_name"),
     pathogenType: text("pathogen_type").$type<PathogenType>().notNull().default("unknown"),
     severity: text("severity").$type<DiseaseSeverity>().notNull().default("unknown"),
+    spreadRisk: text("spread_risk").$type<SpreadRisk>().notNull().default("unknown"),
+    urgency: text("urgency").$type<DiseaseUrgency>().notNull().default("monitor"),
     confidence: doublePrecision("confidence").notNull().default(0),
     summary: text("summary").notNull().default(""),
     symptoms: jsonb("symptoms").$type<string[]>().notNull(),
@@ -201,6 +218,11 @@ export const diseaseScans = pgTable(
     chemicalTreatment: jsonb("chemical_treatment").$type<string[]>().notNull(),
     prevention: jsonb("prevention").$type<string[]>().notNull(),
     lookAlikes: jsonb("look_alikes").$type<string[]>().notNull(),
+    differentials: jsonb("differentials")
+      .$type<DifferentialDiagnosis[]>()
+      .notNull()
+      .default([]),
+    monitoring: text("monitoring"),
     source: text("source").notNull().default("gemini"),
     model: text("model"),
     createdAt: timestamp("created_at").defaultNow(),

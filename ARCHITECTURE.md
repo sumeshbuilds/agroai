@@ -6,7 +6,7 @@ AgroAI is a zero-cost MVP web application (PWA) for farmers. It provides four co
 2. **Live Field Camera:** A phone acts as an edge camera (`/camera`). It runs COCO-SSD on-device, tracks **only humans and animals** across frames, and streams small JPEG frames + boxes to the laptop dashboard (`/watch`) in near real time. A confirmed track raises a dashboard alarm (banner + optional siren/notification). This replaces the old simulated intrusion alerts.
 3. **AI Weekly Crop Advisory:** Farmers select their planted crop and sowing date. Every week, an AI analyzes local 7-day weather forecasts and soil metrics to tell them exactly what to do next.
 4. **Hyper-Local Weather Dashboard:** Real-time and 7-day agricultural weather forecast (rain, wind, temperature, soil moisture) for their exact farm centroid or the phone's live GPS.
-5. **Plant Doctor (photo disease detection):** A farmer takes or uploads a photo of a diseased leaf, stem, fruit, flower, root or whole plant. Gemini Vision identifies the most likely disease / pest / nutrient problem, returns a confidence score, visible symptoms, immediate actions, organic and chemical options, prevention steps and look-alike conditions. Every scan is stored privately for the farmer.
+5. **Plant Doctor (photo disease detection):** A farmer takes or uploads a photo of a diseased leaf, stem, fruit, flower, root or whole plant. Gemini Vision first judges photo quality and subject, then identifies the most likely disease / pest / nutrient problem with a confidence score, ranked differential diagnoses, spread risk, urgency, visible symptoms, immediate actions, organic and chemical options, prevention and look-alike conditions. Crop growth stage and live weather are passed as context, and a low-confidence read is cross-checked by Groq. Every scan is stored privately for the farmer.
 
 ## 2. Strict Tech Stack (Zero-Cost Constraints)
 - **Framework:** Next.js 16 (App Router), TypeScript, Tailwind CSS, Lucide Icons.
@@ -14,10 +14,10 @@ AgroAI is a zero-cost MVP web application (PWA) for farmers. It provides four co
 - **ORM:** Drizzle ORM (`drizzle-orm`, `drizzle-kit`).
 - **Maps:** `leaflet` and `react-leaflet` using Esri World Imagery free satellite tiles (`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`). NEVER use Google Maps or Mapbox (they require billing).
 - **Weather API:** Open-Meteo API (`https://api.open-meteo.com/v1/forecast`). No API key required.
-- **AI Engine:** Google Gemini API (`@google/generative-ai`) using the free tier model `gemini-3.8-flash` for the weekly advisory and plant-photo disease detection. The plant doctor has a server-side timeout and an optional Groq vision fallback; it fails with a clear message instead of inventing a diagnosis.
+- **AI Engine:** Google Gemini API (`@google/generative-ai`) using the free tier model `gemini-3.8-flash` for the weekly advisory and plant-photo disease detection. The plant doctor has a server-side timeout, crop-stage + weather context in the prompt, and an optional Groq second opinion when the first read is weak; it fails with a clear message instead of inventing a diagnosis.
 - **Edge vision:** TensorFlow.js + COCO-SSD on the phone (`tfjs-core`, `tfjs-converter`, `tfjs-backend-webgl`), inference on a 416 px canvas, filtered to a human/animal-only class catalog. No vehicle/motion boxes.
 - **Vision verifier (optional):** Groq OpenAI-compatible chat completions (`qwen/qwen3.8-27b`, `GROQ_VISION_MODEL` to override) checks **one frame per new confirmed track**, scheduled with `after()` so it never delays ingest.
-- **Live transport:** Token-scoped camera sessions + adaptive JPEG snapshots (320–560 px, 0.7–5 s cadence depending on link quality) + normalised detection boxes, polled by the dashboard. Uploads are `multipart/form-data` (raw JPEG, no base64 overhead). No WebRTC signalling server and no paid video CDN.
+- **Live transport:** Token-scoped camera sessions + adaptive JPEG snapshots (320–560 px, 0.7 s cadence on a good link, stretching automatically from measured upload time and failures) + normalised detection boxes, polled by the dashboard. Weak links get smaller frames, bounded upload timeouts, exponential retry backoff and a 45 s live window; hidden dashboard tabs refresh metadata only. Uploads are `multipart/form-data` (raw JPEG, no base64 overhead). No WebRTC signalling server and no paid video CDN.
 - **Alerts:** Confirmed human/animal tracks only, written to `camera_alerts`, polled by the dashboard banner, with optional Web Audio siren + browser Notification. Local (no VAPID keys).
 
 ## 3. Directory Structure
@@ -49,11 +49,13 @@ src/
 │   └── schema.ts                  # Drizzle schema
 └── lib/
     ├── camera.ts                  # Trackable classes, confirmation, alarm copy, DTOs
+    ├── camera-link.ts             # Weak-link upload cadence, timeouts, poll backoff
     ├── camera-queries.ts          # Sessions, dedupe, ingest, alerts, verification apply
-    ├── disease.ts                 # Plant parts, analysis/DTO types, result normaliser
-    ├── disease-ai.ts              # Gemini Vision + optional Groq fallback with timeouts
+    ├── disease.ts                 # Plant parts, analysis/DTO types, normaliser + provider merge
+    ├── disease-ai.ts              # Gemini Vision + Groq fallback/second opinion with timeouts
+    ├── disease-context.ts         # Crop stage, known threats and best-effort weather context
     ├── disease-queries.ts         # Scan insert/list/delete + auth-scoped image lookup
-    ├── image.ts                   # Browser photo compression (1000 px JPEG, EXIF-aware)
+    ├── image.ts                   # Browser compression (1280 px JPEG) + blur/exposure check
     ├── groq.ts                    # Optional Groq vision verifier
     ├── alarm.ts                   # Siren + notification helpers
     ├── weather.ts                 # Open-Meteo fetcher
@@ -72,6 +74,6 @@ src/
 - Only **confirmed** tracks may raise an alarm (3 hits at ≥ 0.42 or 2 hits at ≥ 0.82). Keep the per-camera 8 s alarm cooldown and compare timestamps with SQL `now()`, never the app clock.
 - Optional AI calls (Groq verification) must run in `after()` and fail soft (`null`), so a slow or missing key can never delay or break frame ingest.
 - Plant scans are **farmer-private**: every scan row, image and delete is scoped by `farmer_id`. Never expose a scan image by bare id without the session check.
-- Compress plant photos in the browser (long edge 1000 px, JPEG) and cap uploads at 2.5 MB; validate the magic bytes server-side, not just the declared MIME type.
+- Compress plant photos in the browser (long edge 1280 px, JPEG) and cap uploads at 2.5 MB; validate the magic bytes server-side, not just the declared MIME type. Warn about blurry, dark or low-resolution photos before the AI call.
 - Never persist a made-up plant diagnosis. If Gemini and Groq are unavailable or time out, return `502 DISEASE_AI_UNAVAILABLE` and do not insert a scan.
-- Plant-doctor copy must stay cautious: show confidence, encourage a second photo when it is low, and point the farmer to a local agriculture officer/KVK before spending money on pesticides.
+- Plant-doctor copy must stay cautious: show confidence, encourage a second photo when it is low, and point the farmer to a local agriculture officer/KVK before spending money on pesticides. A low-confidence or ambiguous read must surface as `uncertain`, never as a confident disease name.

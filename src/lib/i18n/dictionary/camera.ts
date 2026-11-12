@@ -37,6 +37,13 @@ export const CAMERA: Record<string, string> = {
   "Check camera access in your browser settings, then try starting the stream again.":
     "ବ୍ରାଉଜର ସେଟିଂସରେ କ୍ୟାମେରା ପ୍ରବେଶ ଯାଞ୍ଚ କରନ୍ତୁ, ତାପରେ ପୁଣି ଷ୍ଟ୍ରିମ୍ ଆରମ୍ଭ କରିବାକୁ ଚେଷ୍ଟା କରନ୍ତୁ।",
   "Upload: {error}": "ଅପଲୋଡ୍: {error}",
+  "Phone is offline": "ଫୋନ୍ ଅଫଲାଇନ୍ ଅଛି",
+  "Detection keeps running on this phone. Confirmed event frames stay queued and upload automatically when the connection returns; the live preview pauses until then.":
+    "ଏହି ଫୋନ୍ରେ ଚିହ୍ନଟ ଚାଲୁ ରହେ। ନିଶ୍ଚିତ ଘଟଣା ଫ୍ରେମ୍ଗୁଡ଼ିକ ଧାଡ଼ିରେ ରହେ ଓ ସଂଯୋଗ ଫେରିବା ପରେ ସ୍ୱୟଂଚାଳିତ ଭାବରେ ଅପଲୋଡ୍ ହୁଏ; ସେ ପର୍ଯ୍ୟନ୍ତ ଲାଇଭ୍ ପ୍ରିଭ୍ୟୁ ଅଟକି ରହେ।",
+  "Frame upload timed out. The camera will retry with a smaller frame; confirmed events stay queued.":
+    "ଫ୍ରେମ୍ ଅପଲୋଡ୍ ସମୟ ଶେଷ ହେଲା। କ୍ୟାମେରା ଛୋଟ ଫ୍ରେମ୍ ସହିତ ପୁଣି ଚେଷ୍ଟା କରିବ; ନିଶ୍ଚିତ ଘଟଣାଗୁଡ଼ିକ ଧାଡ଼ିରେ ରହିବ।",
+  "Frame upload failed. The camera will retry with a smaller frame; confirmed events stay queued.":
+    "ଫ୍ରେମ୍ ଅପଲୋଡ୍ ବିଫଳ ହେଲା। କ୍ୟାମେରା ଛୋଟ ଫ୍ରେମ୍ ସହିତ ପୁଣି ଚେଷ୍ଟା କରିବ; ନିଶ୍ଚିତ ଘଟଣାଗୁଡ଼ିକ ଧାଡ଼ିରେ ରହିବ।",
   "Stream": "ଷ୍ଟ୍ରିମ୍",
   "Upload": "ଅପଲୋଡ୍",
   "Retrying": "ପୁଣି ଚେଷ୍ଟା",

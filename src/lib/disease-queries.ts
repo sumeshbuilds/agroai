@@ -1,7 +1,11 @@
 import { and, desc, eq, lt } from "drizzle-orm";
 
 import { diseaseScans, type Database, type DiseaseScan } from "@/db";
-import type { DiseaseAnalysis, DiseaseScanDTO } from "./disease";
+import type {
+  DiseaseAnalysis,
+  DiseaseAnalysisSource,
+  DiseaseScanDTO,
+} from "./disease";
 
 function toIso(value: Date | string | null | undefined): string | null {
   if (!value) return null;
@@ -17,10 +21,15 @@ function toDiseaseScanDTO(
     cropName: scan.cropName,
     plantPart: scan.plantPart,
     note: scan.note,
+    subject: scan.subject ?? "plant",
+    imageQuality: scan.imageQuality ?? "unknown",
+    retakeAdvice: scan.retakeAdvice ?? null,
     healthStatus: scan.healthStatus,
     diseaseName: scan.diseaseName,
     pathogenType: scan.pathogenType,
     severity: scan.severity,
+    spreadRisk: scan.spreadRisk ?? "unknown",
+    urgency: scan.urgency ?? "monitor",
     confidence: scan.confidence,
     summary: scan.summary,
     symptoms: scan.symptoms ?? [],
@@ -30,7 +39,14 @@ function toDiseaseScanDTO(
     chemicalTreatment: scan.chemicalTreatment ?? [],
     prevention: scan.prevention ?? [],
     lookAlikes: scan.lookAlikes ?? [],
-    source: scan.source === "groq" ? "groq" : "gemini",
+    differentials: scan.differentials ?? [],
+    monitoring: scan.monitoring ?? null,
+    source:
+      scan.source === "groq"
+        ? "groq"
+        : scan.source === "gemini+groq"
+          ? "gemini+groq"
+          : "gemini",
     model: scan.model,
     imageUrl: `/api/disease/scans/${scan.id}/image`,
     createdAt: toIso(scan.createdAt),
@@ -55,10 +71,15 @@ export async function listDiseaseScans(
       cropName: diseaseScans.cropName,
       plantPart: diseaseScans.plantPart,
       note: diseaseScans.note,
+      subject: diseaseScans.subject,
+      imageQuality: diseaseScans.imageQuality,
+      retakeAdvice: diseaseScans.retakeAdvice,
       healthStatus: diseaseScans.healthStatus,
       diseaseName: diseaseScans.diseaseName,
       pathogenType: diseaseScans.pathogenType,
       severity: diseaseScans.severity,
+      spreadRisk: diseaseScans.spreadRisk,
+      urgency: diseaseScans.urgency,
       confidence: diseaseScans.confidence,
       summary: diseaseScans.summary,
       symptoms: diseaseScans.symptoms,
@@ -68,6 +89,8 @@ export async function listDiseaseScans(
       chemicalTreatment: diseaseScans.chemicalTreatment,
       prevention: diseaseScans.prevention,
       lookAlikes: diseaseScans.lookAlikes,
+      differentials: diseaseScans.differentials,
+      monitoring: diseaseScans.monitoring,
       source: diseaseScans.source,
       model: diseaseScans.model,
       createdAt: diseaseScans.createdAt,
@@ -91,7 +114,7 @@ export async function createDiseaseScan(
     imageMime: string;
     imageData: string;
     analysis: DiseaseAnalysis;
-    source: "gemini" | "groq";
+    source: DiseaseAnalysisSource;
     model: string | null;
   },
 ): Promise<DiseaseScanDTO> {
@@ -107,10 +130,15 @@ export async function createDiseaseScan(
       note: input.note,
       imageMime: input.imageMime,
       imageData: input.imageData,
+      subject: analysis.subject,
+      imageQuality: analysis.imageQuality,
+      retakeAdvice: analysis.retakeAdvice,
       healthStatus: analysis.healthStatus,
       diseaseName: analysis.diseaseName,
       pathogenType: analysis.pathogenType,
       severity: analysis.severity,
+      spreadRisk: analysis.spreadRisk,
+      urgency: analysis.urgency,
       confidence: analysis.confidence,
       summary: analysis.summary,
       symptoms: analysis.symptoms,
@@ -120,6 +148,8 @@ export async function createDiseaseScan(
       chemicalTreatment: analysis.chemicalTreatment,
       prevention: analysis.prevention,
       lookAlikes: analysis.lookAlikes,
+      differentials: analysis.differentials,
+      monitoring: analysis.monitoring,
       source: input.source,
       model: input.model,
     })

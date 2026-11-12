@@ -611,6 +611,28 @@ animal into a real dashboard alarm — while staying usable on weak mobile data.
 - Server cap on frame size is 650 KB and only the newest frame per session is
   stored.
 
+**6a. Weak-link and sync hardening (12 Nov 2026)**
+
+- Upload cadence now derives from the **measured** attempt (`uploadMs`, failures)
+  as well as `navigator.connection`: failed attempts back off 2 → 4 → 8 → 16 →
+  30 s and the next frame is sent only after roughly half the link's measured
+  capacity has been used. A hung request is aborted after 14–25 s instead of
+  20–30 s.
+- The phone stops posting while `navigator.onLine` is false, keeps detection
+  local, and resumes immediately on `online`. Confirmed event frames remain in
+  the bounded buffer; a growing backlog also switches new event frames to the
+  smaller/cheaper encode.
+- `LIVE_WINDOW_MS` is 45 s, so a phone uploading every 20–30 s no longer flips
+  between live/offline. The dashboard shows an explicit "Reconnecting…" state.
+- `/watch` polling is adaptive: 1.5 s live / 4 s slow, exponential backoff on
+  failures (3 → 6 → 12 → 15 s), 15 s when hidden, and metadata-only while the
+  tab is hidden (no JPEG download). The cheap session-list poll backs off to
+  30 s. The list/detail snapshots are timestamped so an external stop/restart is
+  reflected even if the detail poll is stalled.
+- Server ingest returns the updated session metadata from the same `UPDATE`
+  round trip, removing a second query from every frame upload.
+- Unit coverage lives in `tests/camera/link-adaptive.test.ts` (6 new tests).
+
 **Verification**
 
 ```
@@ -668,8 +690,11 @@ also be opened from a crop's day card (`Scan a leaf`).
 **Photo pipeline**
 
 - Browser-side `prepareScanImage()` loads the photo, applies EXIF orientation,
-  downscales the long edge to 1000 px, fills transparent PNGs on white and
-  re-encodes JPEG (quality 0.82 → 0.62 until ≤ 1.2 MB).
+  downscales the long edge to 1280 px, fills transparent PNGs on white and
+  re-encodes JPEG (quality 0.86 → 0.64 until ≤ 1.4 MB). It also samples a 240 px
+  grayscale copy and computes average brightness + Laplacian variance, so blurry,
+  dark, overexposed and low-resolution photos get an inline warning before the
+  AI call (the warning never blocks a deliberate "scan anyway").
 - Upload is `multipart/form-data`; the server checks JPEG/PNG/WebP magic bytes,
   not just the declared MIME type, and rejects anything over 2.5 MB.
 - The compressed JPEG is stored as base64 in `disease_scans` and served back
@@ -679,16 +704,26 @@ also be opened from a crop's day card (`Scan a leaf`).
 **AI analysis**
 
 - `src/lib/disease-ai.ts` sends the photo + crop/part/note to Gemini Vision
-  (`gemini-3.8-flash`, JSON mode) with a 40 s timeout. The prompt asks for a
-  cautious diagnosis, visible symptoms, causes, immediate actions, organic and
-  general chemical options, prevention and look-alikes — never a pesticide dose.
+  (`gemini-3.8-flash`, JSON mode) with a 40 s timeout. The prompt asks the model
+  to first judge subject and photo quality, then give a cautious diagnosis with
+  visible symptoms, causes, immediate actions, organic and general chemical
+  options, prevention, look-alikes, ranked differentials, spread risk, urgency
+  and a monitoring date — never a pesticide dose.
+- Crop context is attached from the farmer's own record: growth stage, day since
+  sowing and the stage's known threats (`crop-guide.ts`), plus a best-effort
+  3-day weather line from Open-Meteo (2.5 s timeout; dropped if slow).
 - If Gemini fails and `GROQ_API_KEY` exists, the same photo goes to Groq's
-  OpenAI-compatible vision endpoint (18 s timeout) as a fallback.
+  OpenAI-compatible vision endpoint (18 s timeout) as a fallback. When Gemini's
+  read is uncertain, low-confidence or photo-limited, Groq also provides an
+  independent second opinion (12 s cap). Agreement raises confidence;
+  disagreement lowers it and adds the other diagnosis to the differential list.
+  `DISEASE_SECOND_OPINION=false` disables the cross-check.
 - With neither provider available, or when both fail, the route returns
   `502 DISEASE_AI_UNAVAILABLE`; **nothing is saved**. No fake diagnosis.
 - Model replies are normalised (`86` confidence → `0.86`, common synonyms for
-  health status/pathogen/severity, arrays trimmed and de-duplicated) before the
-  scan is inserted.
+  health status/pathogen/severity/risk/urgency, arrays trimmed and de-duplicated).
+  A non-plant subject can never keep a disease name, and a `diseased` reply below
+  0.40 confidence is downgraded to `uncertain` with retake guidance.
 
 **UI**
 
@@ -697,10 +732,15 @@ also be opened from a crop's day card (`Scan a leaf`).
   line, camera/upload actions, crop select from the farmer's own crops plus
   common presets, six plant-part pills, optional note with counter.
 - The result card shows a coloured healthy/diseased/uncertain banner, confidence
-  bar, pathogen/severity/part/source chips, scanned image, "what the scan shows",
-  numbered "do this now" actions, organic and chemical blocks (with a safety
-  note), prevention, look-alikes and the AI-check disclaimer. Low confidence
-  (<45%) explicitly asks for a closer photo.
+  bar, pathogen/severity/urgency/spread/quality/part/source chips, scanned image,
+  "what the scan shows", numbered "do this now" actions, organic and chemical
+  blocks (with a safety note), ranked differential diagnoses with their own
+  confidence bars, a monitoring reminder, prevention, look-alikes and the AI-check
+  disclaimer. Low confidence (<45%) asks for a closer photo, and a one-tap
+  "take a better photo" / "scan another plant part" path reopens the camera.
+- A blurry/dark/low-resolution photo shows an inline quality warning and the
+  button becomes "Scan this photo anyway"; the result card repeats the model's
+  retake advice when the scan is photo-limited.
 - Recent scans show private thumbnails, status dot, disease/crop/part,
   confidence, time, click-to-open and inline two-step delete.
 - The rail/dock gained a fifth **Scan** item; the mobile dock stays 5-up with no
@@ -712,13 +752,16 @@ also be opened from a crop's day card (`Scan a leaf`).
   optional crop FK (`set null`), crop/part/note, image MIME + base64, health
   status, disease/pathogen/severity, confidence, summary and seven JSON string
   arrays, source/model and timestamps. Indexes on `(farmer_id, created_at)` and
-  `crop_id`. `npm run db:push` applied it to Neon branch `production`.
+  `crop_id`. Migration `0006_disease_scan_context.sql` adds `subject`,
+  `image_quality`, `retake_advice`, `spread_risk`, `urgency`, `differentials`
+  (jsonb) and `monitoring`. Applied to the configured Neon database with
+  `npm run db:push` (12 Nov 2026).
 
 **Environment**
 
 - `GEMINI_API_KEY` now also powers the plant doctor. Optional:
   `DISEASE_GEMINI_TIMEOUT_MS`, `GEMINI_BASE_URL`, `GROQ_DISEASE_MODEL`,
-  `GROQ_DISEASE_TIMEOUT_MS`.
+  `GROQ_DISEASE_TIMEOUT_MS`, `DISEASE_SECOND_OPINION=false`.
 
 **Verification**
 
@@ -752,6 +795,70 @@ npm run db:push    → 0005 applied
 | Client | `src/lib/api-client.ts`, `src/components/crops/CropsView.tsx` (scan link), `src/components/layout/AppNav.tsx` |
 | i18n / style | `src/lib/i18n/dictionary/disease.ts`, dictionary index, `src/app/globals.css` |
 | Docs / config | `.env.example`, `README.md`, `ARCHITECTURE.md`, `DATABASE_SCHEMA.md`, this file |
+
+---
+
+## 12A. Plant doctor — detection-quality upgrade (12 Nov 2026)
+
+**Why**
+
+A single vision model reading a bare photo can be confidently wrong, and a
+blurry phone shot produced a low-value diagnosis after a long wait. This pass
+gives the model real farm context, makes the reply more honest and structured,
+adds an independent cross-check, and catches weak photos before the AI call.
+
+**Prompt and context**
+
+- `disease-context.ts` attaches the crop's growth stage, day since sowing and
+  stage-specific threats from `crop-guide.ts`, plus a compact 3-day weather line
+  from Open-Meteo. Weather uses a 2.5 s abort and is dropped on failure/absence,
+  so a slow forecast never blocks a scan.
+- The prompt now asks the model to judge subject (`plant` / `not_plant` /
+  `unclear`) and photo quality first, then return ranked `differentials`,
+  `spreadRisk`, `urgency`, `retakeAdvice` and a `monitoring` date. It is told to
+  use context only to rank candidates, never to override visible evidence.
+- The normaliser cleans all new fields, sorts and de-duplicates differentials,
+  clears disease fields for healthy/non-plant photos, downgrades a `diseased`
+  reply below 0.40 confidence to `uncertain`, and defaults retake advice when the
+  photo is poor or confidence is low.
+
+**Second opinion**
+
+- When Gemini's first read is `uncertain`, photo-limited or below 0.60
+  confidence, and `GROQ_API_KEY` is set, Groq reads the same photo independently
+  (capped at 12 s and only started within 24 s of the request). Agreement raises
+  confidence by up to 0.08; disagreement lowers it, keeps the stronger read and
+  adds the other diagnosis to the differential list. `source` becomes
+  `gemini+groq`. `DISEASE_SECOND_OPINION=false` disables this.
+- The original Gemini-only fallback chain is unchanged when Groq is missing or
+  the cross-check fails.
+
+**Photo quality + UI**
+
+- `prepareScanImage()` now keeps more detail (1280 px, quality 0.86 → 0.64,
+  ≤ 1.4 MB) and runs a 240 px grayscale analysis for brightness and Laplacian
+  variance. Blurry, dark, overexposed or low-resolution photos get an inline
+  warning; the action becomes "Scan this photo anyway".
+- The result card shows differential diagnoses with confidence bars, urgency and
+  spread-risk chips, photo-quality/retake guidance, a monitoring reminder, and
+  one-tap "take a better photo" / "scan another plant part" actions.
+- New Odia strings cover the quality warning, urgency/spread labels, retake
+  actions and differential section.
+
+**Database**
+
+- Migration `0006_disease_scan_context.sql` adds `subject`, `image_quality`,
+  `retake_advice`, `spread_risk`, `urgency`, `differentials` (jsonb) and
+  `monitoring` to `disease_scans`. Apply with `npm run db:push`.
+
+**Verification**
+
+```
+npm run typecheck   → 0 errors
+npm run lint        → 0 errors (1 pre-existing warning: i18n core `exact`)
+npm test            → 51 camera + 12 disease tests pass
+npm run build       → succeeds (28 routes)
+```
 
 ---
 

@@ -47,6 +47,10 @@ import {
 } from "@/lib/camera";
 import { formatRelative } from "@/lib/format";
 import {
+  nextPollDelay,
+  nextSessionListDelay,
+} from "@/lib/camera-link";
+import {
   cameraFrameVersion, loadCameraPreviewFrame, snapshotFrameDetections,
   type CameraPreviewFrame,
 } from "@/lib/camera-preview";
@@ -60,8 +64,31 @@ interface SessionDetail {
   detections: CameraDetectionDTO[];
 }
 
-const POLL_MS_NORMAL = 1_000;
-const POLL_MS_SLOW = 2_500;
+interface LinkProfile {
+  saveData: boolean;
+  effectiveType: string;
+  slow: boolean;
+  online: boolean;
+}
+
+function readLinkProfile(): LinkProfile {
+  if (typeof navigator === "undefined") {
+    return { saveData: false, effectiveType: "", slow: false, online: true };
+  }
+  const connection = (
+    navigator as Navigator & {
+      connection?: { saveData?: boolean; effectiveType?: string };
+    }
+  ).connection;
+  const saveData = Boolean(connection?.saveData);
+  const effectiveType = connection?.effectiveType ?? "";
+  return {
+    saveData,
+    effectiveType,
+    slow: saveData || effectiveType === "2g" || effectiveType === "slow-2g",
+    online: navigator.onLine !== false,
+  };
+}
 
 export function WatchView() {
   const { t } = useI18n();
@@ -69,19 +96,6 @@ export function WatchView() {
   const hostname = useClientValue(() => window.location.hostname, "");
   const protocol = useClientValue(() => window.location.protocol, "http:");
   const port = useClientValue(() => window.location.port, "");
-  // Slow links (2G / data saver) poll less often to keep the feed usable.
-  const pollMs = useClientValue(() => {
-    const connection = (
-      navigator as Navigator & {
-        connection?: { saveData?: boolean; effectiveType?: string };
-      }
-    ).connection;
-    return connection?.saveData ||
-      connection?.effectiveType === "2g" ||
-      connection?.effectiveType === "slow-2g"
-      ? POLL_MS_SLOW
-      : POLL_MS_NORMAL;
-  }, POLL_MS_NORMAL);
 
   const [sessions, setSessions] = useState<CameraSessionDTO[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(true);
@@ -104,6 +118,17 @@ export function WatchView() {
   } | null>(null);
   const [weatherError, setWeatherError] = useState<string | null>(null);
   const [clock, setClock] = useState(0);
+  const [network, setNetwork] = useState<LinkProfile>(() => ({
+    saveData: false,
+    effectiveType: "",
+    slow: false,
+    online: true,
+  }));
+  const [syncState, setSyncState] = useState<"idle" | "ok" | "retrying">("idle");
+  const [sourceUpdatedAt, setSourceUpdatedAt] = useState({
+    sessions: 0,
+    detail: 0,
+  });
 
   const selectedRef = useRef<number | null>(null);
   const activeRef = useRef(false);
@@ -116,6 +141,9 @@ export function WatchView() {
   const previewRef = useRef<CameraPreviewFrame | null>(null);
   const ownedUrlsRef = useRef(new Set<string>());
   const copiedTimerRef = useRef(0);
+  const detailFailuresRef = useRef(0);
+  const sessionsFailuresRef = useRef(0);
+  const selectedLiveRef = useRef(false);
 
   useEffect(() => {
     activeRef.current = true;
@@ -132,6 +160,27 @@ export function WatchView() {
   }, []);
 
   useEffect(() => {
+    const connection = (
+      navigator as Navigator & {
+        connection?: {
+          addEventListener?: (type: string, listener: () => void) => void;
+          removeEventListener?: (type: string, listener: () => void) => void;
+        };
+      }
+    ).connection;
+    const update = () => setNetwork(readLinkProfile());
+    update();
+    connection?.addEventListener?.("change", update);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      connection?.removeEventListener?.("change", update);
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+
+  useEffect(() => {
     const src = previewFrame?.src;
     const urls = ownedUrlsRef.current;
     return () => {
@@ -143,6 +192,9 @@ export function WatchView() {
     if (selectedRef.current === id) return;
     selectedRef.current = id;
     detailControllerRef.current?.abort();
+    detailFailuresRef.current = 0;
+    setSourceUpdatedAt((current) => ({ ...current, detail: 0 }));
+    setSyncState("idle");
     previewRef.current = null;
     setPreviewFrame(null);
     setDetailError(null);
@@ -156,8 +208,19 @@ export function WatchView() {
   }, []);
 
   const activeDetail = detail?.session.id === selectedId ? detail : null;
+  const listedSession = sessions.find((s) => s.id === selectedId) ?? null;
   const selectedSession =
-    activeDetail?.session ?? sessions.find((s) => s.id === selectedId) ?? null;
+    activeDetail &&
+    listedSession &&
+    sourceUpdatedAt.sessions > sourceUpdatedAt.detail
+      ? // The lightweight list poll can be fresher than a stalled detail poll.
+        // Overlay it so an external stop/restart is not hidden.
+        { ...activeDetail.session, ...listedSession }
+      : activeDetail?.session ?? listedSession ?? null;
+
+  useEffect(() => {
+    selectedLiveRef.current = Boolean(selectedSession?.isLive);
+  }, [selectedSession?.isLive]);
 
   // ---- data loading ------------------------------------------------------
   const loadSessions = useCallback(async (silent = false) => {
@@ -175,12 +238,15 @@ export function WatchView() {
         setSessions(data.sessions);
         setNeedsSetup(false);
         setError(null);
+        sessionsFailuresRef.current = 0;
+        setSourceUpdatedAt((current) => ({ ...current, sessions: Date.now() }));
         const current = selectedRef.current;
         if (current === null || !data.sessions.some((session) => session.id === current)) {
           selectSession(data.sessions.find((session) => session.isLive)?.id ?? data.sessions[0]?.id ?? null);
         }
       } catch (cause) {
         if (!activeRef.current || epoch !== epochRef.current || (controller.signal.aborted && !timedOut)) return;
+        sessionsFailuresRef.current = Math.min(5, sessionsFailuresRef.current + 1);
         if (cause instanceof ApiError && cause.code === "DB_NOT_CONFIGURED") setNeedsSetup(true);
         setError(silent ? "Camera list connection lost. Previously loaded cameras are kept; tap Refresh to retry."
           : cause instanceof Error ? cause.message : "Could not load camera sessions.");
@@ -207,6 +273,10 @@ export function WatchView() {
     let timedOut = false;
     const timeout = window.setTimeout(() => { timedOut = true; controller.abort(); }, 12_000);
     const accept = () => activeRef.current && !controller.signal.aborted && selectedRef.current === id && epoch === epochRef.current;
+    const markOk = () => {
+      detailFailuresRef.current = 0;
+      setSyncState((current) => (current === "ok" ? current : "ok"));
+    };
     const task = (async () => {
       try {
         // At most one metadata+JPEG operation per camera. A superseded image
@@ -215,12 +285,22 @@ export function WatchView() {
           const data = await api.getCameraSession(id, { signal: controller.signal });
           if (!accept()) return;
           setDetail(data);
+          setSourceUpdatedAt((current) => ({ ...current, detail: Date.now() }));
           const version = cameraFrameVersion(data.session);
           const current = previewRef.current;
-          if (!version) { setDetailError(null); return; }
+          if (!version) { setDetailError(null); markOk(); return; }
           if (current?.sessionId === id && current.version === version) {
             commitPreview({ ...current, detections: snapshotFrameDetections(data.session.latestDetections) });
             setDetailError(null);
+            markOk();
+            return;
+          }
+          // A hidden dashboard does not need the JPEG. Metadata still refreshes
+          // so session status stays correct; the next visible tick fetches the
+          // newest frame.
+          if (document.visibilityState !== "visible") {
+            setDetailError(null);
+            markOk();
             return;
           }
           try {
@@ -228,6 +308,7 @@ export function WatchView() {
             if (!accept()) { URL.revokeObjectURL(frame.src); return; }
             commitPreview(frame);
             setDetailError(null);
+            markOk();
             return;
           } catch (cause) {
             if (cause instanceof ApiError && cause.code === "FRAME_SUPERSEDED" && attempt === 0) continue;
@@ -236,7 +317,13 @@ export function WatchView() {
         }
       } catch (cause) {
         if (!activeRef.current || selectedRef.current !== id || epoch !== epochRef.current || (controller.signal.aborted && !timedOut)) return;
-        setDetailError(cause instanceof ApiError && cause.code === "FRAME_SUPERSEDED"
+        const superseded =
+          cause instanceof ApiError && cause.code === "FRAME_SUPERSEDED";
+        if (!superseded) {
+          detailFailuresRef.current = Math.min(6, detailFailuresRef.current + 1);
+          setSyncState("retrying");
+        }
+        setDetailError(superseded
           ? "A newer snapshot is arriving. The previous matching image and boxes are kept."
           : silent ? "Camera connection lost. The previous matching image and boxes are kept; tap Refresh to retry."
           : cause instanceof Error ? cause.message : "Could not load this camera.");
@@ -254,6 +341,8 @@ export function WatchView() {
 
   const refreshNow = async () => {
     setRefreshing(true);
+    sessionsFailuresRef.current = 0;
+    detailFailuresRef.current = 0;
     try {
       await loadSessions(true);
       if (selectedRef.current !== null) {
@@ -269,23 +358,39 @@ export function WatchView() {
     let timer = 0;
     const tick = async (silent = true) => {
       await loadSessions(silent);
-      if (!stopped) timer = window.setTimeout(() => void tick(), 8_000);
+      if (stopped) return;
+      timer = window.setTimeout(
+        () => void tick(),
+        nextSessionListDelay({
+          hidden: document.visibilityState !== "visible",
+          online: network.online,
+          failures: sessionsFailuresRef.current,
+        }),
+      );
     };
     timer = window.setTimeout(() => void tick(false), 0);
     const retry = () => {
-      if (!sessionsRequestRef.current && !mutationRef.current) {
-        window.clearTimeout(timer);
-        void tick();
+      if (
+        document.visibilityState !== "visible" ||
+        sessionsRequestRef.current ||
+        mutationRef.current
+      ) {
+        return;
       }
+      sessionsFailuresRef.current = 0;
+      window.clearTimeout(timer);
+      void tick();
     };
     window.addEventListener("online", retry);
+    document.addEventListener("visibilitychange", retry);
     return () => {
       stopped = true;
       window.clearTimeout(timer);
       sessionsControllerRef.current?.abort();
       window.removeEventListener("online", retry);
+      document.removeEventListener("visibilitychange", retry);
     };
-  }, [loadSessions]);
+  }, [loadSessions, network.online]);
 
   useEffect(() => {
     let active = true;
@@ -308,14 +413,31 @@ export function WatchView() {
     let timer = 0;
     const tick = async (silent = true) => {
       await loadDetail(selectedId, silent);
-      if (!stopped) timer = window.setTimeout(() => void tick(), document.visibilityState === "visible" ? pollMs : 5_000);
+      if (stopped) return;
+      timer = window.setTimeout(
+        () => void tick(),
+        nextPollDelay({
+          hidden: document.visibilityState !== "visible",
+          online: network.online,
+          failures: detailFailuresRef.current,
+          live: selectedLiveRef.current,
+          slow: network.slow,
+          hasFrame: Boolean(previewRef.current),
+        }),
+      );
     };
     timer = window.setTimeout(() => void tick(false), 0);
     const retry = () => {
-      if (document.visibilityState === "visible" && !detailRequestRef.current && !mutationRef.current) {
-        window.clearTimeout(timer);
-        void tick();
+      if (
+        document.visibilityState !== "visible" ||
+        detailRequestRef.current ||
+        mutationRef.current
+      ) {
+        return;
       }
+      detailFailuresRef.current = 0;
+      window.clearTimeout(timer);
+      void tick();
     };
     document.addEventListener("visibilitychange", retry);
     window.addEventListener("online", retry);
@@ -326,7 +448,7 @@ export function WatchView() {
       document.removeEventListener("visibilitychange", retry);
       window.removeEventListener("online", retry);
     };
-  }, [selectedId, loadDetail, pollMs]);
+  }, [selectedId, loadDetail, network.slow, network.online]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setClock(Date.now()), 1000);
@@ -510,13 +632,16 @@ export function WatchView() {
         )
       : null;
 
-  const liveChipLabel = selectedSession?.isLive
-    ? t("Live camera")
-    : selectedSession?.status === "live"
-      ? t("Waiting for frames")
-      : selectedSession?.status === "ended"
-        ? t("Stream ended")
-        : t("No live camera");
+  const linkTrouble = !network.online || syncState === "retrying";
+  const liveChipLabel = linkTrouble
+    ? t(network.online ? "Reconnecting…" : "Offline")
+    : selectedSession?.isLive
+      ? t("Live camera")
+      : selectedSession?.status === "live"
+        ? t("Waiting for frames")
+        : selectedSession?.status === "ended"
+          ? t("Stream ended")
+          : t("No live camera");
 
   return (
     <div className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-6 lg:py-8">
@@ -530,16 +655,16 @@ export function WatchView() {
           action={<>
           <span
             className={
-              selectedSession?.isLive
+              !linkTrouble && selectedSession?.isLive
                 ? "chip chip-brand"
-                : selectedSession?.status === "live"
+                : selectedSession?.status === "live" || linkTrouble
                   ? "chip chip-warn"
                   : "chip bg-[var(--card-muted)] text-[var(--muted)]"
             }
           >
             <span
               className={
-                selectedSession?.isLive
+                !linkTrouble && selectedSession?.isLive
                   ? "h-1.5 w-1.5 rounded-full bg-leaf-600"
                   : "h-1.5 w-1.5 rounded-full bg-current opacity-50"
               }
@@ -626,6 +751,8 @@ export function WatchView() {
                 session={selectedSession}
                 frame={activePreview}
                 frameAge={frameAge}
+                syncState={syncState}
+                online={network.online}
               />
 
               <section aria-label={t("Camera statistics")} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -1023,10 +1150,14 @@ function LivePlayer({
   session,
   frame,
   frameAge,
+  syncState,
+  online,
 }: {
   session: CameraSessionDTO | null;
   frame: CameraPreviewFrame | null;
   frameAge: number | null;
+  syncState: "idle" | "ok" | "retrying";
+  online: boolean;
 }) {
   const { t } = useI18n();
   const detections = frame?.detections ?? [];
@@ -1148,6 +1279,12 @@ function LivePlayer({
             />
             {session?.isLive ? t("Live") : t("Offline")}
           </span>
+          {!online || syncState === "retrying" ? (
+            <span className="inline-flex items-center gap-1 rounded-full border border-amber-400/40 bg-amber-500/20 px-2.5 py-1 text-[10px] font-bold text-amber-100 backdrop-blur">
+              <WifiOff className="h-3 w-3" />
+              {t(online ? "Reconnecting…" : "Offline")}
+            </span>
+          ) : null}
           {session?.aiEnabled ? (
             <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/30 bg-emerald-500/20 px-2.5 py-1 text-[10px] font-bold text-emerald-200 backdrop-blur">
               <Cpu className="h-3 w-3" />
