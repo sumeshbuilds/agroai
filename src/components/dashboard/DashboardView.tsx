@@ -16,14 +16,19 @@ import {
 } from "lucide-react";
 
 import { AreaPanel } from "@/components/dashboard/AreaPanel";
+import { DailyChecklistCard } from "@/components/dashboard/DailyChecklistCard";
+import { SatelliteCard } from "@/components/dashboard/SatelliteCard";
+import { SoilCropFitCard } from "@/components/dashboard/SoilCropFitCard";
+import { WorkWindowsCard, WorkWindowsSkeleton } from "@/components/dashboard/WorkWindowsCard";
 import { SetupNotice } from "@/components/setup/SetupNotice";
 import { FarmSwitcher, WorkbenchBar } from "@/components/layout/PageBar";
 import { ApiError, api } from "@/lib/api-client";
 import type { CameraSessionDTO } from "@/lib/camera";
+import type { FarmPlanResponse } from "@/lib/farm-plan";
 import { acresToSquareMetres } from "@/lib/format";
 import { useFarms } from "@/lib/hooks/use-farms";
 import { useI18n } from "@/lib/i18n";
-import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
+import type { WeeklyReportDTO } from "@/lib/types";
 import type { DailyForecast, WeatherSnapshot, WeatherWarning } from "@/lib/weather";
 
 const FarmMap = dynamic(
@@ -81,10 +86,9 @@ export function DashboardView() {
   const [farmId, setFarmId] = useState<number | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
 
-  const [crops, setCrops] = useState<CropDTO[]>([]);
-  const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
-  const [warnings, setWarnings] = useState<WeatherWarning[]>([]);
-  const [weatherLoading, setWeatherLoading] = useState(true);
+  const [plan, setPlan] = useState<FarmPlanResponse | null>(null);
+  const [planLoading, setPlanLoading] = useState(true);
+  const [planError, setPlanError] = useState<string | null>(null);
   const [cameras, setCameras] = useState<CameraSessionDTO[]>([]);
   const [reports, setReports] = useState<WeeklyReportDTO[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -98,15 +102,21 @@ export function DashboardView() {
     ? farms.findIndex((farm) => farm.id === selectedFarm.id)
     : 0;
 
-  const farmCrops = useMemo(() => {
-    if (!selectedFarm) return [];
-    return crops.filter(
-      (crop) =>
-        crop.farmlandId === selectedFarm.id ||
-        crop.farmlandName === selectedFarm.name,
-    );
-  }, [crops, selectedFarm]);
-  const farmCrop = farmCrops.find((crop) => crop.isActive) ?? farmCrops[0] ?? null;
+  const activePlan =
+    plan && plan.farm && selectedFarm && plan.farm.id === selectedFarm.id
+      ? plan
+      : null;
+  const farmCrop = activePlan?.crop ?? null;
+  const farmCrops = useMemo(() => (farmCrop ? [farmCrop] : []), [farmCrop]);
+  const weather = activePlan?.weather ?? null;
+  const warnings = activePlan?.warnings ?? [];
+  const agro = activePlan?.agro ?? null;
+  const soil = activePlan?.soil ?? null;
+  const cropFit = activePlan?.cropFit ?? [];
+  const climate = activePlan?.climate ?? null;
+  const dailyPlan = activePlan?.dailyPlan ?? null;
+  const shopping = activePlan?.shopping ?? [];
+  const weatherLoading = planLoading && !activePlan;
 
   const farmCameras = useMemo(
     () => (selectedFarm ? cameras.filter((camera) => camera.farm?.id === selectedFarm.id) : []),
@@ -122,45 +132,40 @@ export function DashboardView() {
     [reports, farmCrop],
   );
 
-  useEffect(() => {
-    let active = true;
-    void api
-      .listCrops()
-      .then(({ crops: list }) => {
-        if (active) setCrops(list);
-      })
-      .catch(() => undefined);
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  useEffect(() => {
+  const loadPlan = useCallback(async () => {
     if (!selectedFarm) return;
-    const farm = selectedFarm;
+    try {
+      const result = await api.getFarmPlan(selectedFarm.id);
+      setPlan(result);
+      setPlanError(null);
+    } catch (cause) {
+      setPlanError(
+        cause instanceof ApiError
+          ? cause.message
+          : "Could not load the field plan.",
+      );
+    } finally {
+      setPlanLoading(false);
+    }
+  }, [selectedFarm]);
+
+  useEffect(() => {
     let cancelled = false;
-
-    const load = async () => {
-      setWeatherLoading(true);
-      try {
-        const result = await api.getWeatherByFarm(farm.id);
-        if (cancelled) return;
-        setWeather(result.weather);
-        setWarnings(result.warnings);
-      } catch {
-        if (!cancelled) setWeather(null);
-      } finally {
-        if (!cancelled) setWeatherLoading(false);
-      }
-    };
-
-    void load();
-    const timer = window.setInterval(load, 10 * 60 * 1000);
+    const kickoff = window.setTimeout(() => {
+      if (cancelled) return;
+      setPlanLoading(true);
+      setPlanError(null);
+      void loadPlan();
+    }, 0);
+    const timer = window.setInterval(() => {
+      if (!cancelled) void loadPlan();
+    }, 10 * 60 * 1000);
     return () => {
       cancelled = true;
+      window.clearTimeout(kickoff);
       window.clearInterval(timer);
     };
-  }, [selectedFarm]);
+  }, [loadPlan]);
 
   useEffect(() => {
     let active = true;
@@ -173,7 +178,9 @@ export function DashboardView() {
       }
     };
     void load();
-    const timer = window.setInterval(load, 5_000);
+    // Cameras change slowly; a 15 s poll is plenty for the dashboard. The
+    // dedicated /watch page keeps its faster adaptive poll.
+    const timer = window.setInterval(load, 15_000);
     return () => {
       active = false;
       window.clearInterval(timer);
@@ -310,6 +317,15 @@ export function DashboardView() {
             </div>
           </section>
 
+          {planError ? (
+            <div
+              role="alert"
+              className="rounded-xl border border-warn-500/40 bg-warn-100/60 px-3.5 py-3 text-[0.78rem] leading-relaxed text-warn-700"
+            >
+              {t(planError)}
+            </div>
+          ) : null}
+
           <MetricsGrid weather={weather} loading={weatherLoading} />
 
           <OutlookCard days={weather?.daily.slice(0, 7) ?? []} loading={weatherLoading} />
@@ -317,6 +333,33 @@ export function DashboardView() {
           <SoilCard points={weather?.hourlySoilMoisture ?? []} loading={weatherLoading} />
 
           <ForecastCard weather={weather} warnings={warnings} loading={weatherLoading} />
+
+          <DailyChecklistCard
+            plan={dailyPlan}
+            loading={weatherLoading}
+            shopping={shopping}
+          />
+
+          {weatherLoading ? (
+            <WorkWindowsSkeleton />
+          ) : (
+            <WorkWindowsCard agro={agro} loading={false} />
+          )}
+
+          {soil ? (
+            <SoilCropFitCard
+              farmId={selectedFarm.id}
+              soil={soil}
+              climate={climate}
+              cropFit={cropFit}
+              onSaved={() => void loadPlan()}
+              compact
+            />
+          ) : (
+            <div className="card h-48 animate-pulse-soft" aria-label={t("Loading soil fit")} />
+          )}
+
+          <SatelliteCard farmId={selectedFarm.id} />
         </section>
 
         {/* Map column */}
@@ -582,7 +625,7 @@ function OutlookCard({
         ? { label: t("Fair for field work"), tone: "text-warn-700" }
         : goodDays >= 1
           ? { label: t("Watch the rain"), tone: "text-warn-700" }
-          : { label: t("Too wet — check drainage"), tone: "text-danger-700" }
+          : { label: t("Too wet G�� check drainage"), tone: "text-danger-700" }
     : {
         label: loading ? t("Awaiting forecast") : t("Forecast unavailable"),
         tone: "text-[var(--color-ink-soft)]",
@@ -601,7 +644,7 @@ function OutlookCard({
         <div className="mt-3 h-10 animate-pulse-soft rounded-lg bg-paper-deep" />
       ) : days.length === 0 ? (
         <p className="muted mt-3 text-sm leading-relaxed">
-          {t("No forecast is available for this field right now. Weather refreshes automatically — check back shortly.")}
+          {t("No forecast is available for this field right now. Weather refreshes automatically G�� check back shortly.")}
         </p>
       ) : (
         <>
@@ -616,7 +659,7 @@ function OutlookCard({
             {works.map((work, index) => (
               <span
                 key={days[index].date}
-                title={`${t(weekday(days[index].date))} · ${work.reason}`}
+                title={`${t(weekday(days[index].date))} -+ ${work.reason}`}
                 className={`w-full flex-1 rounded-md ${DAY_TONES[work.level].fill}`}
                 aria-hidden
               />
@@ -649,6 +692,7 @@ function OutlookCard({
     </section>
   );
 }
+
 
 function SoilCard({
   points,

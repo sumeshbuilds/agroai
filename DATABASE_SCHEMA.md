@@ -36,6 +36,18 @@ export const farmlands = pgTable('farmlands', {
   centroidLat: doublePrecision('centroid_lat').notNull(),
   centroidLng: doublePrecision('centroid_lng').notNull(),
   areaAcres: doublePrecision('area_acres'), // also shown as ha / m²
+  // Soil Health Card values — nullable, entered by the farmer
+  soilPh: doublePrecision('soil_ph'),
+  soilEc: doublePrecision('soil_ec'),
+  soilOrganicCarbon: doublePrecision('soil_organic_carbon'),
+  soilNitrogen: doublePrecision('soil_nitrogen'),
+  soilPhosphorus: doublePrecision('soil_phosphorus'),
+  soilPotassium: doublePrecision('soil_potassium'),
+  soilSandPct: doublePrecision('soil_sand_pct'),
+  soilClayPct: doublePrecision('soil_clay_pct'),
+  soilSiltPct: doublePrecision('soil_silt_pct'),
+  soilTexture: text('soil_texture'),
+  soilTestedAt: timestamp('soil_tested_at'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

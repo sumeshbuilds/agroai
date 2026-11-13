@@ -4,11 +4,11 @@ A mobile-first assistant for small and marginal farmers, combining free satellit
 imagery, hyper-local weather, an AI weekly crop advisory, and a phone-powered
 live field camera that recognises people and animals in near real time.
 
-> **Status:** fully functional on Neon — farms, crops, reports and live camera
-> detections persist on branch `production`; Gemini advisory and COCO-SSD
-> on-device detection are wired. See [`PROGRESS.md`](./PROGRESS.md) for the
-> verification report and [`LIVE_CAMERA.md`](./LIVE_CAMERA.md) for the demo
-> setup.
+> **Status:** fully functional on Neon — farms, crops, soil tests, reports and
+> live camera detections persist on branch `production`; Gemini advisory,
+> on-device COCO-SSD detection and the deterministic soil/work-window engines
+> are wired. See [`PROGRESS.md`](./PROGRESS.md) for the verification report and
+> [`LIVE_CAMERA.md`](./LIVE_CAMERA.md) for the demo setup.
 
 ## Features
 
@@ -23,34 +23,50 @@ a tabbed, illustrative tour of the workstation. The signed-in app opens at
 2. **Satellite farmland mapping** — draw a field boundary on Esri World Imagery;
    the app computes the centroid and area in **acres, hectares and m²** and saves
    it. The satellite field polygon is also drawn on the dashboard map.
-3. **Hyper-local weather** — 7-day forecast from Open-Meteo for the exact field
-   centre (or the phone's live GPS), plus soil moisture and rain/heat/wind
-   warnings.
+3. **Hyper-local weather & field-work plan** — 7-day forecast from Open-Meteo
+   for the exact field centre (or the phone's live GPS), now including ET₀,
+   radiation, soil temperature/moisture, VPD and leaf wetness. A deterministic
+   plan answers "should I work today, and when?" with per-day go/care/wait
+   verdicts and sowing, spraying, irrigation, fertiliser, weeding and harvest
+   windows.
 4. **Crop-day guide** — deterministic stage-by-stage tasks based on the crop,
    crop day and expected duration supplied during onboarding.
 5. **Pest siren** — rule-based risk analysis of crop stage + live weather, with a
    Web Audio siren, browser notification and a transparent "why this score"
    breakdown for high-risk days.
 6. **Weekly AI crop advisory** — add crops with sowing dates; Gemini produces a
-   4-point action plan (irrigation, fertilizer/spray timing, pest watch, next
-   step). Falls back to a rule-based plan when the Gemini API is unavailable.
+   5-section action plan (irrigation, fertiliser/spray timing, pest watch, best
+   field-work days, next step) using ET₀, workable days and the soil test. Falls
+   back to a rule-based plan when the Gemini API is unavailable.
 7. **Live field camera (real, not simulated)** — `/watch` pairs a phone with a
    QR code. The phone runs **COCO-SSD on-device** and tracks **only humans and
    animals** (vehicles and generic motion are filtered out). A track is logged
    once it is confirmed across several frames, and each confirmed human/animal
    raises a **dashboard alarm** with an optional siren + browser notification.
-   The laptop shows a near-live feed with moving boxes, trails, confidence,
-   direction, a detection feed and field weather from the phone's GPS. Frames are
-   ~20–60 KB at 0.7–2.6 s intervals, so it works on a normal mobile data
-   connection. An optional Groq vision model double-checks new tracks.
+   **Event-only mode is the default:** the phone keeps detecting locally and
+   sends a photo only when a confirmed event is queued, plus a slow heartbeat,
+   so it can stay open on mobile data. Continuous preview is an opt-in toggle.
+   An optional Groq vision model double-checks new tracks.
    **The old fake `simulate` intrusion panel has been removed.**
 8. **Plant doctor (photo disease detection)** — `/detect` lets the farmer take a
    photo (rear camera on a phone) or upload one of any affected plant part. The
    browser compresses it, Gemini Vision identifies the most likely disease,
    pest damage or nutrient problem, and the app returns a confidence score,
    visible symptoms, immediate actions, low-cost/organic options, a cautious
-   chemical option and prevention advice. Every scan is saved with its photo in
-   the farmer's private history.
+   chemical option and prevention advice. An optional Hugging Face PlantVillage
+   classifier runs in parallel as a consensus signal, and the result card shows
+   which models agreed.
+9. **Soil Health Card & crop fit** — enter the values printed on an Indian Soil
+   Health Card (pH, EC, organic carbon, N/P/K, texture). The app rates the soil,
+   explains every limitation, and ranks 22 locally relevant crops against soil,
+   12-month rainfall/temperature and the sowing month. Without a soil test the
+   result is clearly labelled as an estimate.
+10. **Daily checklist** — up to nine reasoned tasks built from the crop stage,
+    forecast, pest risk and soil test, with morning/evening timing, idempotent
+    completion, XP and streaks.
+11. **Satellite field check (optional)** — cloud-masked Sentinel-2 NDVI for the
+    saved polygon via a free Copernicus Data Space client, with observation date,
+    usable-pixel share, previous-scene comparison and honest limits.
 
 ## Tech stack
 
@@ -60,7 +76,10 @@ a tabbed, illustrative tour of the workstation. The signed-in app opens at
 - **Maps:** Leaflet + react-leaflet with Esri World Imagery tiles
 - **Weather:** Open-Meteo (no API key)
 - **AI:** Google Gemini (`@google/generative-ai`) for weekly advisories and
-  plant-photo disease detection (optional Groq fallback)
+  plant-photo disease detection (optional Groq fallback + optional Hugging Face
+  PlantVillage classifier as a consensus signal)
+- **Soil & climate:** Soil Health Card input + Open-Meteo ERA5 12-month normals
+- **Satellite:** optional Copernicus Data Space Sentinel-2 NDVI
 - **On-device vision:** TensorFlow.js (`tfjs-core`, `tfjs-converter`,
   `tfjs-backend-webgl`) + `@tensorflow-models/coco-ssd`
 - **Optional vision verifier:** Groq (`qwen/qwen3.8-27b`, OpenAI-compatible API)

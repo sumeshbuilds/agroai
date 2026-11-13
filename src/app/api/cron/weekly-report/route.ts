@@ -2,6 +2,7 @@ import { connection, type NextRequest } from "next/server";
 
 import { getDb } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
+import { assessAgroWeather } from "@/lib/agro-advisory";
 import { generateWeeklyReport, summariseWeather } from "@/lib/gemini";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import {
@@ -9,8 +10,10 @@ import {
   getCropWithFarm,
   listActiveCropsWithFarm,
   toCropDTO,
+  toFarmDTO,
 } from "@/lib/queries";
 import type { Farmland } from "@/db";
+import { analyseSoil } from "@/lib/soil";
 import type { WeeklyReportDTO } from "@/lib/types";
 import { fetchWeather } from "@/lib/weather";
 
@@ -178,6 +181,12 @@ async function generateReports(cropId?: number, farmerId?: number) {
       sowingDate: target.sowingDate,
       durationDays: target.durationDays,
       weather,
+      agro: assessAgroWeather(weather, {
+        cropName: target.cropName,
+        ageDays: target.ageDays,
+        durationDays: target.durationDays,
+      }),
+      soil: analyseSoil(toFarmDTO(target.farm).soil),
     });
 
     const report = await createReport(
@@ -186,6 +195,7 @@ async function generateReports(cropId?: number, farmerId?: number) {
         cropId: target.cropId,
         weatherSummary: summariseWeather(weather),
         aiActionPlan: advisory.actionPlan,
+        aiActionPlanOr: advisory.actionPlanOr,
         cropName: target.cropName,
       },
       {

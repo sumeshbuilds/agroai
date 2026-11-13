@@ -668,7 +668,7 @@ export function WatchView() {
         <SectionHeading
           title={t("Animal & people watch")}
           subtitle={t(
-            "Your phone is the camera. It watches for people and animals on-device and streams what it sees here — satellites map the land, cameras watch what moves on it.",
+            "Your phone is the camera. It watches for people and animals on-device and streams what it sees here. Event-only mode sends photos only for confirmed events, so the preview can stay still between them.",
           )}
           icon={<Radar aria-hidden className="h-5 w-5" />}
           action={<>

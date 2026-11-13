@@ -192,4 +192,42 @@ export const PATTERNS: TranslationRule[] = [
         { crop: t(m[1]) },
       ),
   },
+
+  /* Daily checklist: reasons and summaries built from live numbers */
+  {
+    pattern: /^(\d+)% rain chance on (.+)$/,
+    render: (m) => `${m[2]}ରେ ବର୍ଷାର ସମ୍ଭାବନା ${m[1]}%`,
+  },
+  {
+    pattern: /^7-day moisture deficit ~? ?([\d.]+) ?mm$/,
+    render: (m) => `୭ ଦିନରେ ପାଣିର ଅଭାବ ପ୍ରାୟ ${m[1]} ମି.ମି.`,
+  },
+  {
+    pattern: /^Surface soil moisture (\d+)%$/,
+    render: (m) => `ଉପର ମାଟିର ଆର୍ଦ୍ରତା ${m[1]}%`,
+  },
+  {
+    pattern: /^High of (\d+)°?C$/,
+    render: (m) => `ସର୍ବାଧିକ ତାପମାତ୍ରା ${m[1]}°C`,
+  },
+  {
+    pattern: /^Calm window on (.+)$/,
+    render: (m) => `${m[1]}ରେ ଶାନ୍ତ ସମୟ`,
+  },
+  {
+    pattern: /^(.+) · day (\d+) · (.+)$/,
+    render: (m, t) => `${t(m[1])} · ${m[2]} ଦିନ · ${t(m[3])}`,
+  },
+  {
+    pattern: /^(\d+) urgent task(?:s)? plus (\d+) routine check(?:s)?\.$/,
+    render: (m) => `ଆଜି ${m[1]} ଜରୁରୀ କାମ ଓ ${m[2]} ନିୟମିତ ଯାଞ୍ଚ ଅଛି।`,
+  },
+  {
+    pattern: /^(\d+) useful task(?:s)? for today\.$/,
+    render: (m) => `ଆଜି ପାଇଁ ${m[1]} ଉପଯୋଗୀ କାମ ଅଛି।`,
+  },
+  {
+    pattern: /^Pest risk is (low|moderate|high|critical)$/,
+    render: (m, t) => `କୀଟ ବିପଦ ${t(m[1])}`,
+  },
 ];

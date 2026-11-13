@@ -104,13 +104,19 @@ export function ReportCard({
                 >
                   <div className="relative h-32 shrink-0 bg-white p-2">
                     {/* Local copy of the Amazon listing photo — cannot rot. */}
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={item.image}
-                      alt=""
-                      loading="lazy"
-                      className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.04]"
-                    />
+                    {item.image ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={item.image}
+                        alt=""
+                        loading="lazy"
+                        className="h-full w-full object-contain transition-transform duration-300 group-hover:scale-[1.04]"
+                      />
+                    ) : (
+                      <span className="flex h-full w-full items-center justify-center text-3xl">
+                        🛒
+                      </span>
+                    )}
                     <span
                       className={cn(
                         "chip absolute left-1.5 top-1.5 px-1.5 py-0.5 text-[0.625rem] shadow-sm",

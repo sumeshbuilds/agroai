@@ -15,6 +15,7 @@ import {
   polygonAreaAcres,
   polygonCentroid,
 } from "./geo";
+import { normalizeSoilInput, type SoilTexture } from "./soil";
 import type {
   CropDTO,
   FarmDTO,
@@ -30,6 +31,27 @@ function toIso(value: Date | string | null | undefined): string | null {
 }
 
 export function toFarmDTO(farm: Farmland): FarmDTO {
+  const soil = normalizeSoilInput({
+    ph: farm.soilPh,
+    ec: farm.soilEc,
+    organicCarbon: farm.soilOrganicCarbon,
+    nitrogen: farm.soilNitrogen,
+    phosphorus: farm.soilPhosphorus,
+    potassium: farm.soilPotassium,
+    sandPct: farm.soilSandPct,
+    clayPct: farm.soilClayPct,
+    siltPct: farm.soilSiltPct,
+    texture: farm.soilTexture as SoilTexture | null,
+    testedAt: farm.soilTestedAt
+      ? farm.soilTestedAt instanceof Date
+        ? farm.soilTestedAt.toISOString()
+        : String(farm.soilTestedAt)
+      : null,
+  });
+  const hasSoil = Object.values(soil).some(
+    (value) => value !== null && value !== undefined,
+  );
+
   return {
     id: farm.id,
     farmerId: farm.farmerId,
@@ -38,6 +60,7 @@ export function toFarmDTO(farm: Farmland): FarmDTO {
     centroidLat: farm.centroidLat,
     centroidLng: farm.centroidLng,
     areaAcres: farm.areaAcres,
+    soil: hasSoil ? soil : null,
     createdAt: toIso(farm.createdAt),
   };
 }
@@ -71,6 +94,7 @@ function toReportDTO(
     cropId: report.cropId,
     cropName: report.cropName ?? null,
     aiActionPlan: report.aiActionPlan,
+    aiActionPlanOr: report.aiActionPlanOr ?? null,
     weatherSummary: report.weatherSummary,
     createdAt: toIso(report.createdAt),
     ...extra,
@@ -153,11 +177,49 @@ export async function createFarmland(
   return toFarmDTO(inserted[0]);
 }
 
+export async function updateFarmSoil(
+  db: Database,
+  farmId: number,
+  farmerId: number,
+  soil: {
+    ph: number | null;
+    ec: number | null;
+    organicCarbon: number | null;
+    nitrogen: number | null;
+    phosphorus: number | null;
+    potassium: number | null;
+    sandPct: number | null;
+    clayPct: number | null;
+    siltPct: number | null;
+    texture: string | null;
+    testedAt: Date | null;
+  },
+): Promise<FarmDTO | null> {
+  const rows = await db
+    .update(farmlands)
+    .set({
+      soilPh: soil.ph,
+      soilEc: soil.ec,
+      soilOrganicCarbon: soil.organicCarbon,
+      soilNitrogen: soil.nitrogen,
+      soilPhosphorus: soil.phosphorus,
+      soilPotassium: soil.potassium,
+      soilSandPct: soil.sandPct,
+      soilClayPct: soil.clayPct,
+      soilSiltPct: soil.siltPct,
+      soilTexture: soil.texture,
+      soilTestedAt: soil.testedAt,
+    })
+    .where(and(eq(farmlands.id, farmId), eq(farmlands.farmerId, farmerId)))
+    .returning();
+
+  return rows.length > 0 ? toFarmDTO(rows[0]) : null;
+}
+
 /**
  * Claims an unowned (or legacy pre-auth) farm for a new farmer. Returns null
  * when the farm has already been claimed by a real account.
- */
-export async function claimFarmland(
+ */export async function claimFarmland(
   db: Database,
   farmId: number,
   farmerId: number,
@@ -296,6 +358,7 @@ export async function createReport(
     cropId: number;
     weatherSummary: unknown;
     aiActionPlan: string;
+    aiActionPlanOr?: string | null;
     cropName?: string | null;
   },
   extra?: { source?: "gemini" | "fallback"; model?: string; note?: string },
@@ -306,6 +369,7 @@ export async function createReport(
       cropId: input.cropId,
       weatherSummary: input.weatherSummary,
       aiActionPlan: input.aiActionPlan,
+      aiActionPlanOr: input.aiActionPlanOr ?? null,
     })
     .returning();
 

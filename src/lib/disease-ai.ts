@@ -18,6 +18,11 @@ import {
   type DiseaseAnalysisSource,
   type PlantPart,
 } from "./disease";
+import {
+  classifyPlantImage,
+  mergeClassifierSignal,
+  type ClassifierSignal,
+} from "./disease-classifier";
 import { getGeminiModel } from "./gemini";
 import { parseGroqJson } from "./groq";
 
@@ -59,6 +64,8 @@ export interface AnalysePlantImageInput {
   plantPart: PlantPart;
   note?: string | null;
   context?: DiseaseContext | null;
+  /** Optional classifier label used to steer a fallback vision read. */
+  classifierHint?: string | null;
 }
 
 export interface DiseaseAnalysisResult {
@@ -111,6 +118,11 @@ function buildPrompt(input: AnalysePlantImageInput): string {
   }
   if (context.weather?.trim()) {
     contextLines.push(`Weather around the farm now: ${context.weather.trim()}`);
+  }
+  if (input.classifierHint?.trim()) {
+    contextLines.push(
+      `A PlantVillage-trained image classifier suggested: ${input.classifierHint.trim()}. Treat it as a hint only — confirm with visible evidence.`,
+    );
   }
 
   return [
@@ -343,16 +355,33 @@ function needsSecondOpinion(analysis: DiseaseAnalysis): boolean {
   return (
     analysis.subject !== "plant" ||
     analysis.imageQuality === "poor" ||
-    analysis.imageQuality === "fair" ||
     analysis.healthStatus === "uncertain" ||
-    analysis.confidence < 0.6
+    analysis.confidence < 0.55
   );
 }
 
+type SourcePart = "gemini" | "groq" | "classifier";
+
+function combineSource(parts: SourcePart[]): DiseaseAnalysisSource {
+  const unique = [...new Set(parts)];
+  return unique.join("+") as DiseaseAnalysisSource;
+}
+
+function classifierHint(signal: ClassifierSignal | null): string | null {
+  if (!signal?.diseaseName) return null;
+  return `${signal.cropName ? `${signal.cropName} — ` : ""}${signal.diseaseName} (${Math.round(
+    signal.score * 100,
+  )}%)`;
+}
+
 /**
- * Reads one photo. Gemini is tried first; Groq is a fallback. When the first
- * read is uncertain and both keys exist, Groq provides a second opinion and the
- * two analyses are merged. A failure is reported as
+ * Reads one photo.
+ *
+ * Gemini and the optional Hugging Face classifier start **in parallel**, so the
+ * classifier costs almost no extra waiting. Gemini remains the explainable
+ * primary read; the classifier only confirms, lowers confidence, or adds a
+ * differential. Groq is used as a fallback and as a second opinion for weak
+ * reads, and now receives the classifier hint. A failure is reported as
  * `DiseaseAiUnavailableError` so the route can return a friendly 502 without
  * persisting anything.
  */
@@ -366,31 +395,53 @@ export async function analysePlantImage(
   }
 
   const startedAt = Date.now();
+  const classifierPromise = classifyPlantImage({
+    imageBase64: input.imageBase64,
+    mimeType: input.mimeType,
+    cropName: input.cropName,
+  }).catch(() => null);
 
   if (process.env.GEMINI_API_KEY?.trim()) {
-    try {
-      const primary = await analyseWithGemini(input);
+    const [geminiOutcome, classifier] = await Promise.all([
+      analyseWithGemini(input)
+        .then((result) => ({ ok: true as const, result }))
+        .catch((error: unknown) => ({ ok: false as const, error })),
+      classifierPromise,
+    ]);
+
+    if (geminiOutcome.ok) {
+      const primary = geminiOutcome.result;
+      const combined = mergeClassifierSignal(primary.analysis, classifier);
 
       if (
         secondOpinionEnabled() &&
-        needsSecondOpinion(primary.analysis) &&
+        needsSecondOpinion(combined.analysis) &&
         Date.now() - startedAt < SECOND_OPINION_START_DEADLINE_MS &&
         process.env.GROQ_API_KEY?.trim()
       ) {
         try {
           const secondary = await analyseWithGroq(
-            input,
+            {
+              ...input,
+              classifierHint: classifierHint(classifier),
+            },
             SECOND_OPINION_MAX_WAIT_MS,
           );
           const merged = mergeDiseaseAnalyses(
-            primary.analysis,
+            combined.analysis,
             secondary.analysis,
           );
           return {
             analysis: merged.analysis,
-            source: "gemini+groq",
-            model: `${primary.model} + ${secondary.model}`,
-            agreed: merged.agreed,
+            source: combineSource([
+              "gemini",
+              "groq",
+              ...(classifier ? (["classifier"] as const) : []),
+            ]),
+            model: `${primary.model} + ${secondary.model}${
+              classifier ? ` + ${classifier.model}` : ""
+            }`,
+            agreed: merged.agreed && combined.agreed !== false,
           };
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
@@ -401,19 +452,75 @@ export async function analysePlantImage(
         }
       }
 
-      return primary;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn("[disease] Gemini analysis failed:", message.slice(0, 240));
+      return {
+        analysis: combined.analysis,
+        source: combineSource([
+          "gemini",
+          ...(classifier ? (["classifier"] as const) : []),
+        ]),
+        model: classifier
+          ? `${primary.model} + ${classifier.model}`
+          : primary.model,
+        agreed: combined.agreed ?? undefined,
+      };
     }
-  }
 
-  if (process.env.GROQ_API_KEY?.trim()) {
-    try {
-      return await analyseWithGroq(input);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.warn("[disease] Groq analysis failed:", message.slice(0, 240));
+    const message =
+      geminiOutcome.error instanceof Error
+        ? geminiOutcome.error.message
+        : String(geminiOutcome.error);
+    console.warn("[disease] Gemini analysis failed:", message.slice(0, 240));
+
+    // Gemini failed but the classifier may still have a useful hint for Groq.
+    const pendingClassifier = await classifierPromise;
+    if (process.env.GROQ_API_KEY?.trim()) {
+      try {
+        const fallback = await analyseWithGroq({
+          ...input,
+          classifierHint: classifierHint(pendingClassifier),
+        });
+        const combined = mergeClassifierSignal(fallback.analysis, pendingClassifier);
+        return {
+          analysis: combined.analysis,
+          source: combineSource([
+            "groq",
+            ...(pendingClassifier ? (["classifier"] as const) : []),
+          ]),
+          model: pendingClassifier
+            ? `${fallback.model} + ${pendingClassifier.model}`
+            : fallback.model,
+          agreed: combined.agreed ?? undefined,
+        };
+      } catch (error) {
+        const groqMessage =
+          error instanceof Error ? error.message : String(error);
+        console.warn(
+          "[disease] Groq analysis failed:",
+          groqMessage.slice(0, 240),
+        );
+      }
+    }
+  } else if (process.env.GROQ_API_KEY?.trim()) {
+    const [groqOutcome, classifier] = await Promise.all([
+      analyseWithGroq(input)
+        .then((result) => ({ ok: true as const, result }))
+        .catch((error: unknown) => ({ ok: false as const, error })),
+      classifierPromise,
+    ]);
+
+    if (groqOutcome.ok) {
+      const combined = mergeClassifierSignal(groqOutcome.result.analysis, classifier);
+      return {
+        analysis: combined.analysis,
+        source: combineSource([
+          "groq",
+          ...(classifier ? (["classifier"] as const) : []),
+        ]),
+        model: classifier
+          ? `${groqOutcome.result.model} + ${classifier.model}`
+          : groqOutcome.result.model,
+        agreed: combined.agreed ?? undefined,
+      };
     }
   }
 

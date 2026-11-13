@@ -7,11 +7,49 @@ export interface DailyForecast {
   precipitationSum: number;
   precipitationProbability: number;
   windSpeedMax: number;
+  /** Maximum gust at 10 m, km/h. */
+  windGustMax: number;
+  /** FAO reference evapotranspiration for the day, mm. */
+  et0: number;
+  /** Incoming shortwave radiation, MJ/m². */
+  radiationMj: number;
+  uvIndexMax: number;
+  /** Mean relative humidity at 2 m, %. */
+  humidityMean: number;
+  dewPointMean: number;
+  /** Bright sunshine, hours. */
+  sunshineHours: number;
 }
 
 export interface HourlySoilMoisture {
   time: string;
   value: number | null;
+}
+
+/**
+ * One hourly forecast row with the extra fields the agronomy engine needs.
+ * Kept separate from `hourlySoilMoisture` so existing UI code keeps working.
+ */
+export interface HourlyAgroPoint {
+  time: string;
+  temperature: number | null;
+  humidity: number | null;
+  precipitation: number | null;
+  precipitationProbability: number | null;
+  windSpeed: number | null;
+  windGust: number | null;
+  /** Volumetric soil moisture, 0–7 cm. */
+  soilMoisture: number | null;
+  /** Volumetric soil moisture, 7–28 cm. */
+  soilMoistureDeep: number | null;
+  soilTemperature: number | null;
+  /** Probability that leaves stay wet, %. */
+  leafWetness: number | null;
+  /** Vapour pressure deficit, kPa. */
+  vpd: number | null;
+  /** Shortwave radiation, W/m². */
+  radiation: number | null;
+  et0: number | null;
 }
 
 export interface CurrentWeather {
@@ -21,17 +59,29 @@ export interface CurrentWeather {
   humidity: number | null;
   precipitation: number | null;
   windSpeed: number | null;
+  windGust: number | null;
+  apparentTemperature: number | null;
+  dewPoint: number | null;
+  radiation: number | null;
+  uvIndex: number | null;
   soilMoisture: number | null;
+  /** Volumetric soil moisture, 7–28 cm. */
+  soilMoistureDeep: number | null;
+  soilTemperature: number | null;
+  /** Vapour pressure deficit, kPa. */
+  vpd: number | null;
 }
 
 export interface WeatherSnapshot {
   latitude: number;
   longitude: number;
+  elevation: number | null;
   timezone: string;
   timezoneAbbreviation: string;
   current: CurrentWeather;
   daily: DailyForecast[];
   hourlySoilMoisture: HourlySoilMoisture[];
+  hourlyAgro: HourlyAgroPoint[];
   fetchedAt: string;
   source: "open-meteo";
 }
@@ -52,30 +102,75 @@ export class WeatherFetchError extends Error {
 interface OpenMeteoResponse {
   latitude?: number;
   longitude?: number;
+  elevation?: number;
   timezone?: string;
   timezone_abbreviation?: string;
   current?: Record<string, unknown>;
-  hourly?: {
-    time?: string[];
-    soil_moisture_0_to_1cm?: Array<number | null>;
-  };
-  daily?: {
-    time?: string[];
-    temperature_2m_max?: Array<number | null>;
-    temperature_2m_min?: Array<number | null>;
-    precipitation_sum?: Array<number | null>;
-    precipitation_probability_max?: Array<number | null>;
-    wind_speed_10m_max?: Array<number | null>;
-  };
+  hourly?: Record<string, Array<number | null> | string[] | undefined>;
+  daily?: Record<string, Array<number | null> | string[] | undefined>;
   reason?: string;
 }
 
 const num = (value: unknown): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
+const numAt = (
+  series: Array<number | null> | string[] | undefined,
+  index: number,
+): number | null => (Array.isArray(series) ? num(series[index]) : null);
+
+const CURRENT_FIELDS = [
+  "temperature_2m",
+  "relative_humidity_2m",
+  "precipitation",
+  "wind_speed_10m",
+  "wind_gusts_10m",
+  "apparent_temperature",
+  "dew_point_2m",
+  "shortwave_radiation",
+  "uv_index",
+  "soil_moisture_0_to_7cm",
+  "soil_moisture_7_to_28cm",
+  "soil_temperature_0_to_7cm",
+  "vapour_pressure_deficit",
+].join(",");
+
+const HOURLY_FIELDS = [
+  "temperature_2m",
+  "relative_humidity_2m",
+  "precipitation",
+  "precipitation_probability",
+  "wind_speed_10m",
+  "wind_gusts_10m",
+  "soil_moisture_0_to_7cm",
+  "soil_moisture_7_to_28cm",
+  "soil_temperature_0_to_7cm",
+  "leaf_wetness_probability",
+  "vapour_pressure_deficit",
+  "shortwave_radiation",
+  "et0_fao_evapotranspiration",
+].join(",");
+
+const DAILY_FIELDS = [
+  "temperature_2m_max",
+  "temperature_2m_min",
+  "precipitation_sum",
+  "precipitation_probability_max",
+  "wind_speed_10m_max",
+  "wind_gusts_10m_max",
+  "et0_fao_evapotranspiration",
+  "shortwave_radiation_sum",
+  "uv_index_max",
+  "relative_humidity_2m_mean",
+  "dew_point_2m_mean",
+  "sunshine_duration",
+].join(",");
+
 /**
  * Fetches the agricultural weather forecast for a farm centroid from
- * Open-Meteo (no API key required).
+ * Open-Meteo (no API key required). The response now includes the extra
+ * radiation, ET0, soil-temperature and leaf-wetness fields used by the
+ * field-work and disease-pressure engines.
  */
 export async function fetchWeather(
   latitude: number,
@@ -85,11 +180,9 @@ export async function fetchWeather(
   const params = new URLSearchParams({
     latitude: latitude.toFixed(5),
     longitude: longitude.toFixed(5),
-    current:
-      "temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m",
-    hourly: "soil_moisture_0_to_1cm",
-    daily:
-      "temperature_2m_max,temperature_2m_min,precipitation_sum,precipitation_probability_max,wind_speed_10m_max",
+    current: CURRENT_FIELDS,
+    hourly: HOURLY_FIELDS,
+    daily: DAILY_FIELDS,
     timezone: "auto",
     forecast_days: "7",
   });
@@ -99,6 +192,7 @@ export async function fetchWeather(
     response = await fetch(`${OPEN_METEO_ENDPOINT}?${params.toString()}`, {
       headers: { Accept: "application/json" },
       signal: options.signal,
+      cache: "no-store",
     });
   } catch (cause) {
     // Connection errors (e.g. `fetch failed`, connect timeouts) must surface as
@@ -116,42 +210,84 @@ export async function fetchWeather(
     );
   }
 
-  const dailyTime = payload.daily?.time ?? [];
+  const dailyTime = (payload.daily?.time as string[] | undefined) ?? [];
   const daily: DailyForecast[] = dailyTime.map((date, index) => ({
     date,
-    tempMax: num(payload.daily?.temperature_2m_max?.[index]) ?? 0,
-    tempMin: num(payload.daily?.temperature_2m_min?.[index]) ?? 0,
-    precipitationSum: num(payload.daily?.precipitation_sum?.[index]) ?? 0,
+    tempMax: numAt(payload.daily?.temperature_2m_max, index) ?? 0,
+    tempMin: numAt(payload.daily?.temperature_2m_min, index) ?? 0,
+    precipitationSum: numAt(payload.daily?.precipitation_sum, index) ?? 0,
     precipitationProbability:
-      num(payload.daily?.precipitation_probability_max?.[index]) ?? 0,
-    windSpeedMax: num(payload.daily?.wind_speed_10m_max?.[index]) ?? 0,
+      numAt(payload.daily?.precipitation_probability_max, index) ?? 0,
+    windSpeedMax: numAt(payload.daily?.wind_speed_10m_max, index) ?? 0,
+    windGustMax: numAt(payload.daily?.wind_gusts_10m_max, index) ?? 0,
+    et0: numAt(payload.daily?.et0_fao_evapotranspiration, index) ?? 0,
+    radiationMj: numAt(payload.daily?.shortwave_radiation_sum, index) ?? 0,
+    uvIndexMax: numAt(payload.daily?.uv_index_max, index) ?? 0,
+    humidityMean: numAt(payload.daily?.relative_humidity_2m_mean, index) ?? 0,
+    dewPointMean: numAt(payload.daily?.dew_point_2m_mean, index) ?? 0,
+    sunshineHours: (numAt(payload.daily?.sunshine_duration, index) ?? 0) / 3600,
   }));
 
-  const hourly = payload.hourly ?? {};
-  const hourlySoilMoisture: HourlySoilMoisture[] = (hourly.time ?? [])
-    .slice(0, 48)
+  const hourlyTime = (payload.hourly?.time as string[] | undefined) ?? [];
+  const hourlyAgro: HourlyAgroPoint[] = hourlyTime
+    .slice(0, 168)
     .map((time, index) => ({
       time,
-      value: num(hourly.soil_moisture_0_to_1cm?.[index]),
+      temperature: numAt(payload.hourly?.temperature_2m, index),
+      humidity: numAt(payload.hourly?.relative_humidity_2m, index),
+      precipitation: numAt(payload.hourly?.precipitation, index),
+      precipitationProbability: numAt(
+        payload.hourly?.precipitation_probability,
+        index,
+      ),
+      windSpeed: numAt(payload.hourly?.wind_speed_10m, index),
+      windGust: numAt(payload.hourly?.wind_gusts_10m, index),
+      soilMoisture: numAt(payload.hourly?.soil_moisture_0_to_7cm, index),
+      soilMoistureDeep: numAt(payload.hourly?.soil_moisture_7_to_28cm, index),
+      soilTemperature: numAt(
+        payload.hourly?.soil_temperature_0_to_7cm,
+        index,
+      ),
+      leafWetness: numAt(payload.hourly?.leaf_wetness_probability, index),
+      vpd: numAt(payload.hourly?.vapour_pressure_deficit, index),
+      radiation: numAt(payload.hourly?.shortwave_radiation, index),
+      et0: numAt(payload.hourly?.et0_fao_evapotranspiration, index),
     }));
+
+  const hourlySoilMoisture: HourlySoilMoisture[] = hourlyAgro
+    .slice(0, 48)
+    .map((point) => ({ time: point.time, value: point.soilMoisture }));
 
   const currentSoilMoisture = findCurrentSoilMoisture(hourlySoilMoisture);
 
   return {
     latitude: num(payload.latitude) ?? latitude,
     longitude: num(payload.longitude) ?? longitude,
+    elevation: num(payload.elevation),
     timezone: payload.timezone ?? "UTC",
     timezoneAbbreviation: payload.timezone_abbreviation ?? "UTC",
     current: {
-      time: typeof payload.current?.time === "string" ? payload.current.time : null,
+      time:
+        typeof payload.current?.time === "string"
+          ? payload.current.time
+          : null,
       temperature: num(payload.current?.temperature_2m),
       humidity: num(payload.current?.relative_humidity_2m),
       precipitation: num(payload.current?.precipitation),
       windSpeed: num(payload.current?.wind_speed_10m),
-      soilMoisture: currentSoilMoisture,
+      windGust: num(payload.current?.wind_gusts_10m),
+      apparentTemperature: num(payload.current?.apparent_temperature),
+      dewPoint: num(payload.current?.dew_point_2m),
+      radiation: num(payload.current?.shortwave_radiation),
+      uvIndex: num(payload.current?.uv_index),
+      soilMoisture: currentSoilMoisture ?? num(payload.current?.soil_moisture_0_to_7cm),
+      soilMoistureDeep: num(payload.current?.soil_moisture_7_to_28cm),
+      soilTemperature: num(payload.current?.soil_temperature_0_to_7cm),
+      vpd: num(payload.current?.vapour_pressure_deficit),
     },
     daily,
     hourlySoilMoisture,
+    hourlyAgro,
     fetchedAt: new Date().toISOString(),
     source: "open-meteo",
   };

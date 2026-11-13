@@ -73,7 +73,7 @@ export function AreaPanel({
 }) {
   const [sensorOpen, setSensorOpen] = useState(true);
   const [camerasOpen, setCamerasOpen] = useState(false);
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
 
   const crop = crops.find((item) => item.isActive) ?? crops[0] ?? null;
   const progress =
@@ -81,8 +81,12 @@ export function AreaPanel({
       ? Math.max(0, Math.min(100, Math.round((crop.ageDays / crop.durationDays) * 100)))
       : null;
 
-  const insight = report?.aiActionPlan
-    ? report.aiActionPlan
+  const planText =
+    lang === "or" && report?.aiActionPlanOr
+      ? report.aiActionPlanOr
+      : report?.aiActionPlan;
+  const insight = planText
+    ? planText
         .replace(/(^|\n)#{1,6}\s+/g, "$1")
         .replace(/\*\*/g, "")
         .replace(/\s+/g, " ")

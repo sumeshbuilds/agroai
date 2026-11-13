@@ -1,6 +1,8 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 
+import { assessAgroWeather, type AgroAssessment } from "./agro-advisory";
 import { getCropDayGuide } from "./crop-guide";
+import type { SoilAnalysis } from "./soil";
 import type { DailyForecast, WeatherSnapshot } from "./weather";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
@@ -13,10 +15,16 @@ export interface WeeklyReportInput {
   /** Expected sowing-to-harvest duration, used to place the crop in its stage. */
   durationDays?: number | null;
   weather: WeatherSnapshot;
+  /** Soil Health Card analysis, when the farmer saved one. */
+  soil?: SoilAnalysis | null;
+  /** Pre-computed work windows; recomputed here when omitted. */
+  agro?: AgroAssessment | null;
 }
 
 export interface WeeklyReportResult {
   actionPlan: string;
+  /** Odia version of the same plan; null when translation was unavailable. */
+  actionPlanOr: string | null;
   source: "gemini" | "fallback";
   model: string;
   note?: string;
@@ -44,6 +52,7 @@ export async function generateWeeklyReport(
   if (!apiKey) {
     return {
       actionPlan: buildFallbackPlan(input),
+      actionPlanOr: null,
       source: "fallback",
       model: "rule-based",
       note: "GEMINI_API_KEY is not set — showing the built-in rule-based advisory. Add a key to .env.local for AI-generated advice.",
@@ -66,13 +75,27 @@ export async function generateWeeklyReport(
       throw new Error("Gemini returned an empty response.");
     }
 
-    return { actionPlan: text, source: "gemini", model };
+    const actionPlanOr = await translatePlanToOdia(client, model, text);
+    return { actionPlan: text, actionPlanOr, source: "gemini", model };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("[gemini] generation failed, using fallback:", message);
 
+    const fallback = buildFallbackPlan(input);
+    let actionPlanOr: string | null = null;
+    try {
+      actionPlanOr = await translatePlanToOdia(
+        new GoogleGenerativeAI(apiKey),
+        model,
+        fallback,
+      );
+    } catch {
+      actionPlanOr = null;
+    }
+
     return {
-      actionPlan: buildFallbackPlan(input),
+      actionPlan: fallback,
+      actionPlanOr,
       source: "fallback",
       model: "rule-based",
       note: `Gemini call failed (${message}). Showing the built-in rule-based advisory instead.`,
@@ -80,16 +103,55 @@ export async function generateWeeklyReport(
   }
 }
 
+/**
+ * Translates a finished plan into simple spoken Odia. The five "## " headings
+ * stay in English so the UI can map them to icons and translate them itself.
+ * Returns null on any failure; the English plan is always the source of truth.
+ */
+async function translatePlanToOdia(
+  client: GoogleGenerativeAI,
+  model: string,
+  plan: string,
+): Promise<string | null> {
+  try {
+    const translator = client.getGenerativeModel({
+      model,
+      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+      systemInstruction:
+        "You translate farm advisories from English to simple, spoken Odia (ଓଡ଼ିଆ) that a village farmer understands. Keep numbers, units, weekday names in Odia, and crop names in common Odia. Keep every line starting with '## ' exactly as in the input, in English. Output only the translation.",
+    });
+    const result = await translator.generateContent(plan);
+    const text = result.response.text().trim();
+    const hasOdia = /[\u0B00-\u0B7F]/.test(text);
+    const headings = (text.match(/^##\s/gm) ?? []).length;
+    const sourceHeadings = (plan.match(/^##\s/gm) ?? []).length;
+    return hasOdia && headings === sourceHeadings ? text : null;
+  } catch (error) {
+    console.error(
+      "[gemini] odia translation failed:",
+      error instanceof Error ? error.message : String(error),
+    );
+    return null;
+  }
+}
+
 export function buildPrompt(input: WeeklyReportInput): string {
   const { cropName, ageDays, sowingDate, weather } = input;
   const guide = getCropDayGuide(cropName, ageDays, input.durationDays);
+  const agro =
+    input.agro ??
+    assessAgroWeather(weather, {
+      cropName,
+      ageDays,
+      durationDays: input.durationDays,
+    });
 
   const forecast = weather.daily
     .map(
       (day) =>
         `${day.date}: ${day.tempMin.toFixed(0)}-${day.tempMax.toFixed(0)}°C, ` +
         `rain ${day.precipitationProbability}% (${day.precipitationSum.toFixed(1)} mm), ` +
-        `wind up to ${day.windSpeedMax.toFixed(0)} km/h`,
+        `wind up to ${day.windSpeedMax.toFixed(0)} km/h, ET₀ ${day.et0.toFixed(1)} mm`,
     )
     .join("\n");
 
@@ -98,13 +160,32 @@ export function buildPrompt(input: WeeklyReportInput): string {
       ? "unknown"
       : `${(weather.current.soilMoisture * 100).toFixed(0)}%`;
 
+  const soilLines: string[] = [];
+  const soilTest = input.soil;
+  if (soilTest && soilTest.source === "soil-health-card") {
+    soilLines.push(
+      `Soil test: pH ${soilTest.ph ?? "unknown"}, texture ${soilTest.textureLabel ?? "unknown"}, ` +
+        `organic carbon ${soilTest.organicCarbon ?? "unknown"}%, ` +
+        `N ${soilTest.nitrogen ?? "?"} kg/ha, P ${soilTest.phosphorus ?? "?"} kg/ha, K ${soilTest.potassium ?? "?"} kg/ha.`,
+    );
+    if (soilTest.issues.length > 0) {
+      soilLines.push(
+        `Soil issues: ${soilTest.issues.map((issue) => issue.title).join("; ")}.`,
+      );
+    }
+  }
+
   return [
     `Crop: ${cropName}`,
     `Growth stage: ${guide.stage.name} (day ${guide.ageDays} of about ${guide.durationDays})`,
     `Sown on: ${sowingDate} (${ageDays} days old)`,
     `Farm location: ${weather.latitude.toFixed(3)}, ${weather.longitude.toFixed(3)} (${weather.timezone})`,
     `Current temperature: ${weather.current.temperature ?? "n/a"}°C`,
-    `Surface soil moisture (0-1 cm): ${soil}`,
+    `Surface soil moisture (0–7 cm): ${soil}`,
+    `7-day water balance: ET₀ ${agro.irrigation.deficitMm.toFixed(1)} mm more than rainfall; ${agro.workableDays} of 7 days are workable.`,
+    `Best spray window: ${agro.sprayingWindow ?? "none — rain or wind all week"}.`,
+    `Disease pressure: ${agro.diseasePressure.level} (${agro.diseasePressure.leafWetnessHours} leaf-wetness hours in 72 h).`,
+    ...soilLines,
     "",
     "Stage focus for this crop:",
     guide.stage.focus,
@@ -114,12 +195,13 @@ export function buildPrompt(input: WeeklyReportInput): string {
     "Next 7 days forecast:",
     forecast,
     "",
-    "Write this week's action plan as four short sections with these exact headings:",
+    "Write this week's action plan as five short sections with these exact headings:",
     "## Irrigation",
     "## Fertilizer & Spraying",
     "## Pest & Disease Watch",
+    "## Best Field-Work Days",
     "## Next Step",
-    `Each section must be 1-2 sentences and specific to ${cropName} at the ${guide.stage.name} stage. Reference specific days from the forecast (e.g. 'Do not spray on Wednesday because of high rain probability'). In Pest & Disease Watch, name the crop-specific threats listed above. Do not add any other sections.`,
+    `Each section must be 1-2 sentences and specific to ${cropName} at the ${guide.stage.name} stage. Reference specific days from the forecast (e.g. 'Do not spray on Wednesday because of high rain probability'). Use the ET₀ balance and workable-day count in the field-work section, and use the soil test to shape the fertiliser advice. In Pest & Disease Watch, name the crop-specific threats listed above. Do not add any other sections.`,
   ].join("\n");
 }
 
@@ -128,6 +210,13 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
   const { cropName, ageDays, weather } = input;
   const guide = getCropDayGuide(cropName, ageDays, input.durationDays);
   const days = weather.daily.slice(0, 7);
+  const agro =
+    input.agro ??
+    assessAgroWeather(weather, {
+      cropName,
+      ageDays,
+      durationDays: input.durationDays,
+    });
 
   const wettest = pickDay(days, (day) => day.precipitationProbability);
   const windiest = pickDay(days, (day) => day.windSpeedMax);
@@ -143,8 +232,8 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
 
   const irrigationBase = wetSoon
     ? `Rain is forecast around ${dayName(wettest)} — pause irrigation and let the rainfall soak in.`
-    : soilDry
-      ? `Surface soil moisture is low (${soil === null ? "n/a" : `${(soil * 100).toFixed(0)}%`}). Irrigate lightly early morning on ${dayName(dry)}, the driest day ahead.`
+    : soilDry || agro.irrigation.deficitMm >= 18
+      ? `The 7-day evaporation deficit is about ${agro.irrigation.deficitMm.toFixed(0)} mm. Irrigate early morning${agro.irrigation.nextWindow ? ` (${agro.irrigation.nextWindow})` : ` on ${dayName(dry)}`}.`
       : `Soil moisture is adequate. Keep a light irrigation schedule and skip any watering on ${dayName(wettest)} if rain arrives.`;
 
   const irrigation = `${irrigationBase}${
@@ -164,9 +253,19 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
     /fertil|nitrogen|top.?dress|nutrient|manure|compost|feed/i.test(task),
   );
 
+  const lowNutrients =
+    input.soil?.ratings
+      .filter((rating) => rating.level === "low")
+      .map((rating) => rating.label) ?? [];
+
+  const soilNote =
+    lowNutrients.length > 0
+      ? ` The soil test shows ${lowNutrients.join(", ").toLowerCase()} low, so match the dose to the crop plan and confirm it with your KVK.`
+      : "";
+
   const sprayBase = sprayDay
-    ? `Spray or apply fertilizer on ${dayName(sprayDay)} when winds are lowest (~${sprayDay.windSpeedMax.toFixed(0)} km/h). Avoid spraying on ${dayName(windiest)} — winds up to ${windiest.windSpeedMax.toFixed(0)} km/h.`
-    : `Spray in the calm early-morning window and avoid windy days.`;
+    ? `Spray or apply fertilizer on ${dayName(sprayDay)} when winds are lowest (~${sprayDay.windSpeedMax.toFixed(0)} km/h). Avoid spraying on ${dayName(windiest)} — winds up to ${windiest.windSpeedMax.toFixed(0)} km/h.${soilNote}`
+    : `Spray in the calm early-morning window and avoid windy days.${soilNote}`;
 
   const spray = `${sprayBase}${
     feedTask ? ` For this crop: ${lowerFirst(feedTask)}` : ""
@@ -177,6 +276,16 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
   const pest = humid
     ? `With rain and high humidity expected, watch ${cropName.toLowerCase()} for ${watchFor}. Inspect the underside of leaves and remove any infected parts.`
     : `Dry, warm conditions favour ${watchFor} at this stage. Scout ${cropName.toLowerCase()} every 2-3 days and act on the first sign of damage.`;
+
+  const fieldWork = `${agro.summary}${
+    agro.sprayingWindow
+      ? ` The cleanest spray gap is ${agro.sprayingWindow}.`
+      : " No calm, rain-free spray gap is available this week."
+  }${
+    agro.harvestWindow
+      ? " The crop is in its harvest window — protect the drying floor from rain."
+      : ""
+  }`;
 
   const stageTask = guide.stage.tasks[0];
   const followUpTask = guide.stage.tasks[1];
@@ -193,6 +302,9 @@ export function buildFallbackPlan(input: WeeklyReportInput): string {
     "",
     "## Pest & Disease Watch",
     pest,
+    "",
+    "## Best Field-Work Days",
+    fieldWork,
     "",
     "## Next Step",
     nextStep,

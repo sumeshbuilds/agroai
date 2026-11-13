@@ -13,8 +13,15 @@ import type {
   CameraSessionDTO,
 } from "./camera";
 import type { DiseaseScanDTO } from "./disease";
+import type {
+  FarmPlanResponse,
+  SatelliteResponse,
+  SoilGetResponse,
+  SoilSaveResponse,
+} from "./farm-plan";
 import type { GeocodeResponse } from "./geocode";
 import type { PestRiskAssessment } from "./pest-risk";
+import type { SoilTestInput } from "./soil";
 import type { WeatherSnapshot, WeatherWarning } from "./weather";
 
 export class ApiError extends Error {
@@ -124,6 +131,31 @@ export const api = {
 
   getWeatherByPoint: (lat: number, lng: number) =>
     request<WeatherResponse>(`/api/weather?lat=${lat}&lng=${lng}`),
+
+  /** Weather + work windows + soil fit + checklist in one authenticated call. */
+  getFarmPlan: (farmId: number, cropId?: number | null, options?: { signal?: AbortSignal }) => {
+    const params = new URLSearchParams({ farmId: String(farmId) });
+    if (cropId) params.set("cropId", String(cropId));
+    return request<FarmPlanResponse>(`/api/farm-plan?${params.toString()}`, {
+      signal: options?.signal,
+      cache: "no-store",
+    });
+  },
+
+  getFarmSoil: (farmId: number) =>
+    request<SoilGetResponse>(`/api/farms/${farmId}/soil`, { cache: "no-store" }),
+
+  saveFarmSoil: (farmId: number, soil: SoilTestInput) =>
+    request<SoilSaveResponse>(`/api/farms/${farmId}/soil`, {
+      method: "POST",
+      body: JSON.stringify(soil),
+    }),
+
+  getSatellite: (farmId: number, options?: { signal?: AbortSignal }) =>
+    request<SatelliteResponse>(`/api/satellite?farmId=${farmId}`, {
+      signal: options?.signal,
+      cache: "no-store",
+    }),
 
   listCrops: () => request<{ crops: CropDTO[] }>("/api/crops"),
 

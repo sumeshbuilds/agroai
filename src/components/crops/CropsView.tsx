@@ -2,21 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  CalendarDays,
-  Check,
-  Droplets,
-  Map as MapIcon,
-  Plus,
-  RefreshCw,
-  ScanLine,
-  Sparkles,
-  SprayCan,
-  Sprout,
-  X,
-} from "lucide-react";
+import { CalendarDays, Check, Map as MapIcon, Plus, RefreshCw, Sparkles, Sprout, X } from "lucide-react";
 
-import { ReportCard } from "@/components/crops/ReportCard";
+import { TodayBoard } from "@/components/crops/TodayBoard";
+import { WeeklyPlanCard } from "@/components/crops/WeeklyPlanCard";
+import { SoilCropFitCard } from "@/components/dashboard/SoilCropFitCard";
+import { WorkWindowsCard } from "@/components/dashboard/WorkWindowsCard";
 import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
@@ -29,102 +20,18 @@ import {
   getCropDayGuide,
   getCropPreset,
 } from "@/lib/crop-guide";
-import { PEST_LEVEL_META, type PestRiskAssessment } from "@/lib/pest-risk";
+import type { FarmPlanResponse } from "@/lib/farm-plan";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useFarms } from "@/lib/hooks/use-farms";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
-import type { WeatherSnapshot } from "@/lib/weather";
 import { todayIso } from "@/lib/format";
 
 /* ------------------------------------------------------------------------- */
 /* Current soil estimate and pest-risk score; readings update without motion. */
 /* ------------------------------------------------------------------------- */
 
-function GaugeRing({
-  percent,
-  tone,
-  icon,
-  label,
-  caption,
-  credit,
-}: {
-  percent: number | null;
-  tone: "info" | "leaf" | "warn" | "danger";
-  icon: React.ReactNode;
-  label: string;
-  caption: string;
-  credit: string;
-}) {
-  const { t } = useI18n();
-  const radius = 50;
-  const circumference = 2 * Math.PI * radius;
-  const shown =
-    percent === null
-      ? 0
-      : Math.max(0, Math.min(100, Math.round(percent)));
-  const dash = (shown / 100) * circumference;
-
-  const ringTone = {
-    info: "text-info-500",
-    leaf: "text-leaf-500",
-    warn: "text-warn-500",
-    danger: "text-danger-500",
-  }[tone];
-
-  return (
-    <div className="flex min-w-0 flex-col items-center gap-3">
-      <div className="relative aspect-square w-[7.375rem] max-w-full">
-        <svg
-          viewBox="0 0 118 118"
-          className="h-full w-full -rotate-90"
-          role="img"
-          aria-label={`${label}: ${percent === null ? t("No data") : `${shown}%`}`}
-        >
-          <circle
-            cx="59"
-            cy="59"
-            r={radius}
-            fill="none"
-            strokeWidth="9"
-            className="stroke-[var(--card-muted)]"
-          />
-          {shown > 0 ? (
-            <circle
-              cx="59"
-              cy="59"
-              r={radius}
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="9"
-              strokeLinecap="round"
-              strokeDasharray={`${dash} ${circumference - dash}`}
-              className={ringTone}
-            />
-          ) : null}
-        </svg>
-        <span className="absolute inset-0 flex flex-col items-center justify-center gap-1">
-          {icon}
-          {percent !== null ? (
-            <span className="text-xs font-semibold tabular-nums text-ink-soft">
-              {shown}%
-            </span>
-          ) : null}
-        </span>
-      </div>
-      <div className="max-w-[11rem] text-center">
-        <p className="text-sm font-semibold">{label}</p>
-        <p className="muted mt-1.5 text-xs leading-relaxed">{caption}</p>
-        <p className="muted mt-2 text-[0.6875rem] leading-relaxed">
-          {credit}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------------- */
 /* Selectable crop tile                                                      */
 /* ------------------------------------------------------------------------- */
 
@@ -197,15 +104,10 @@ export function CropsView() {
   const [generatingAll, setGeneratingAll] = useState(false);
   const [generatingId, setGeneratingId] = useState<number | null>(null);
 
-  // Trackers data for the selected crop
-  const [weatherResult, setWeatherResult] = useState<{
-    farmId: number;
-    weather: WeatherSnapshot | null;
-  } | null>(null);
-  const [pestResult, setPestResult] = useState<{
-    cropId: number;
-    assessment: PestRiskAssessment | null;
-  } | null>(null);
+  // Field intelligence for the selected crop: weather, work windows, pest
+  // risk, soil fit and the daily checklist arrive in one request.
+  const [plan, setPlan] = useState<FarmPlanResponse | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
 
   const today = useClientValue(() => todayIso(), "");
   const effectiveSowingDate = sowingDate || today || "";
@@ -258,50 +160,48 @@ export function CropsView() {
   );
   const selectedFarmId = selectedFarm?.id ?? null;
   const currentCropId = selectedCrop?.id ?? null;
-  const weather = weatherResult?.farmId === selectedFarmId ? weatherResult.weather : null;
-  const weatherLoading = selectedFarmId !== null && weatherResult?.farmId !== selectedFarmId;
-  const pest = pestResult?.cropId === currentCropId ? pestResult.assessment : null;
-  const pestLoading = currentCropId !== null && pestResult?.cropId !== currentCropId;
+  const planMatches =
+    plan !== null &&
+    Boolean(plan.farm) &&
+    plan.farm.id === selectedFarmId &&
+    (currentCropId === null || plan.crop?.id === currentCropId);
+  const weather = planMatches ? plan.weather : null;
+  const pest = planMatches ? plan.pest : null;
+  const agro = planMatches ? plan.agro : null;
+  const dailyPlan = planMatches ? plan.dailyPlan : null;
+  const soil = planMatches ? plan.soil : null;
+  const climate = planMatches ? plan.climate : null;
+  const cropFit = planMatches ? plan.cropFit : [];
   const currentReport =
     reportResult?.cropId === currentCropId ? reportResult.report : null;
   const currentReportLoading =
     currentCropId !== null && reportResult?.cropId !== currentCropId;
 
-  // Watering tracker input: live weather at the selected crop's field centre.
+  // One request replaces the separate weather + pest calls.
   useEffect(() => {
     if (selectedFarmId === null) return;
     const farmId = selectedFarmId;
-    let cancelled = false;
-    void api
-      .getWeatherByFarm(farmId)
-      .then((result) => {
-        if (!cancelled) setWeatherResult({ farmId, weather: result.weather });
-      })
-      .catch(() => {
-        if (!cancelled) setWeatherResult({ farmId, weather: null });
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedFarmId]);
-
-  // Pesticide tracker input: the rule-based pest engine for this crop.
-  useEffect(() => {
-    if (currentCropId === null) return;
     const cropId = currentCropId;
-    let cancelled = false;
-    void api
-      .getPestRisk(cropId)
-      .then((result) => {
-        if (!cancelled) setPestResult({ cropId, assessment: result.assessment });
-      })
-      .catch(() => {
-        if (!cancelled) setPestResult({ cropId, assessment: null });
-      });
+    const controller = new AbortController();
+    const kickoff = window.setTimeout(() => {
+      setPlanLoading(true);
+      void api
+        .getFarmPlan(farmId, cropId, { signal: controller.signal })
+        .then((result) => {
+          if (!controller.signal.aborted) setPlan(result);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setPlan(null);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setPlanLoading(false);
+        });
+    }, 0);
     return () => {
-      cancelled = true;
+      window.clearTimeout(kickoff);
+      controller.abort();
     };
-  }, [currentCropId]);
+  }, [selectedFarmId, currentCropId, reportVersion]);
 
   // Weekly plan: always the newest report for the crop currently selected, so
   // switching crops switches the advice instead of stacking old plans.
@@ -407,38 +307,6 @@ export function CropsView() {
       ? null
       : Math.round(weather.current.soilMoisture * 100);
   const rainToday = weather?.daily[0]?.precipitationProbability ?? null;
-
-  const waterCaption = weatherLoading
-    ? t("Reading live weather…")
-    : soilPct === null
-      ? selectedFarm
-        ? t("No soil estimate for this field yet.")
-        : t("Link the crop to a mapped field to enable this.")
-      : (rainToday ?? 0) >= 50
-        ? t("{rain}% rain today — it may cover you.", { rain: rainToday ?? 0 })
-        : soilPct < 18
-          ? t("Topsoil is drying — irrigate soon.")
-          : soilPct < 28
-            ? t("Moisture OK — recheck tomorrow.")
-            : t("Plenty of moisture — no watering needed.");
-
-  /* Pesticide ring: real rule-based risk score mapped onto the ring. */
-  const pestTone =
-    pest === null
-      ? ("leaf" as const)
-      : pest.level === "low"
-        ? ("leaf" as const)
-        : pest.level === "moderate"
-          ? ("warn" as const)
-          : ("danger" as const);
-
-  const pestCaption = pestLoading
-    ? t("Analysing the forecast…")
-    : pest
-      ? `${t(PEST_LEVEL_META[pest.level].label)} — ${pest.threats[0]?.name ? t(pest.threats[0].name) : t("scout routinely")}`
-      : selectedCrop
-        ? t("Could not analyse — generate a report to retry.")
-        : t("Select a crop.");
 
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:py-8">
@@ -630,141 +498,80 @@ export function CropsView() {
         </section>
       ) : null}
 
-      {/* Today panel — day number + guide beside the two tracker rings */}
+      {/* Today board — one verdict, picture tiles and the tap-to-tick checklist */}
       {selectedCrop && guide ? (
-        <section
-          className="card p-5 sm:p-6"
-          aria-label={t("Today for {crop}", { crop: t(selectedCrop.cropName) })}
-        >
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="flex min-w-0 flex-[1_1_22rem] items-start gap-3.5">
-              <span aria-hidden className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-leaf-100 text-[2rem]">
-                {guide.emoji}
-              </span>
-              <div className="min-w-0">
-                <h2 className="flex flex-wrap items-center gap-2 text-xl font-semibold leading-tight">
-                  {t(guide.cropName)}
-                  <span className="chip chip-brand">{t("Day {day}", { day: guide.ageDays })}</span>
-                </h2>
-                <p className="muted mt-1.5 break-words text-sm">
-                  {selectedCrop.farmlandName ?? t("No field linked")}
-                </p>
-                <p className="muted mt-2 flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-xs tabular-nums">
-                  <span>{t(guide.stage.name)}</span>
-                  <span aria-hidden>·</span>
-                  <span className="inline-flex items-center gap-1">
-                    <CalendarDays className="h-3 w-3" />
-                    {t("sown {date}", { date: selectedCrop.sowingDate })}
-                  </span>
-                  {guide.isHarvestWindow ? (
-                    <span className="chip chip-lime">{t("Harvest window")}</span>
-                  ) : (
-                    <span>
-                      {t("{count} days to harvest", { count: guide.daysToHarvest })}
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Link
-                href={`/detect?cropId=${selectedCrop.id}`}
-                className="btn btn-secondary"
-              >
-                <ScanLine aria-hidden className="h-3.5 w-3.5" />
-                {t("Scan a leaf")}
-              </Link>
-              <Button
-                variant="secondary"
-                onClick={() => handleGenerate(selectedCrop.id)}
-                loading={generatingId === selectedCrop.id}
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                {t("Weekly advisory")}
-              </Button>
-            </div>
-          </div>
-
-          <div className="mt-6 grid gap-7 border-t border-[var(--color-line)] pt-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] lg:items-center">
-            {/* Left: what today is about (real stage guide text) */}
-            <div className="max-w-xl min-w-0 flex-1">
-              <p className="text-base leading-relaxed">
-                {t(guide.stage.focus)}
-              </p>
-              <ul className="mt-4 space-y-2.5">
-                {guide.stage.tasks.slice(0, 3).map((task) => (
-                  <li
-                    key={task}
-                    className="flex items-start gap-2.5 text-sm leading-relaxed"
-                  >
-                    <span
-                      aria-hidden
-                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-leaf-500"
-                    />
-                    {t(task)}
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-5 max-w-sm">
-                <div className="flex items-center justify-between text-xs font-medium">
-                  <span className="muted">{t("Season progress")}</span>
-                  <span className="tabular-nums">{guide.progress}%</span>
-                </div>
-                <div
-                  className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--card-muted)]"
-                  role="progressbar"
-                  aria-label={t("Season progress")}
-                  aria-valuenow={guide.progress}
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                >
-                  <div
-                    className="progress-fill h-full rounded-full bg-leaf-500"
-                    style={{ transform: `scaleX(${guide.progress / 100})` }}
-                    aria-hidden
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Right: the two tracker rings */}
-            <div className="grid grid-cols-2 items-start gap-4 border-t border-[var(--color-line)] pt-6 sm:gap-6 lg:border-0 lg:pt-0">
-              <GaugeRing
-                percent={soilPct}
-                tone="info"
-                icon={<Droplets aria-hidden className="h-8 w-8 text-info-500" strokeWidth={2} />}
-                label={t("Watering")}
-                caption={waterCaption}
-                credit={t("Open-Meteo soil estimate · top 0–1 cm")}
-              />
-              <GaugeRing
-                percent={pest ? pest.score : null}
-                tone={pestTone}
-                icon={<SprayCan aria-hidden className={cn(
-                  "h-8 w-8",
-                  pestTone === "leaf" && "text-leaf-600",
-                  pestTone === "warn" && "text-warn-600",
-                  pestTone === "danger" && "text-danger-600",
-                )} strokeWidth={2} />}
-                label={t("Pesticide watch")}
-                caption={pestCaption}
-                credit={t("Rule engine on live weather · not a spray order")}
-              />
-            </div>
-          </div>
-        </section>
+        <TodayBoard
+          crop={selectedCrop}
+          guide={guide}
+          dailyPlan={dailyPlan}
+          agro={agro}
+          pest={pest}
+          soilPercent={soilPct}
+          rainToday={rainToday}
+          planLoading={planLoading}
+          generating={generatingId === selectedCrop.id}
+          onWeekly={() => handleGenerate(selectedCrop.id)}
+        />
       ) : !loading ? (
         <EmptyState
-           icon={<Sprout aria-hidden className="h-6 w-6" />}
+          icon={<Sprout aria-hidden className="h-6 w-6" />}
           title={t("No crops added yet")}
-          description={t("Tap the dashed Add tile above to plant your first crop — the day guide and trackers unlock immediately.")}
+          description={t(
+            "Tap the dashed Add tile above to plant your first crop — today's jobs and the week ahead appear right away.",
+          )}
           action={
             <Button onClick={() => setShowAdd(true)}>
               <Plus className="h-4 w-4" />
               {t("Add your first crop")}
             </Button>
           }
+        />
+      ) : null}
+
+      {/* Week detail folds away so the page stays short on a phone. */}
+      {selectedCrop ? (
+        <details className="card group overflow-hidden">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-2 p-5 [&::-webkit-details-marker]:hidden">
+            <span className="flex items-center gap-2.5">
+              <span className="icon-tile">
+                <CalendarDays className="h-5 w-5" />
+              </span>
+              <span>
+                <span className="block text-base font-semibold leading-tight">
+                  {t("Best days and windows this week")}
+                </span>
+                <span className="muted block text-xs">
+                  {t("Rain, wind and the calm spraying window")}
+                </span>
+              </span>
+            </span>
+            <span className="muted text-xs font-semibold group-open:hidden">
+              {t("Open")}
+            </span>
+            <span className="muted hidden text-xs font-semibold group-open:inline">
+              {t("Close")}
+            </span>
+          </summary>
+          <div className="border-t border-[var(--color-line)] p-2 sm:p-3">
+            <WorkWindowsCard agro={agro} loading={planLoading && !plan} />
+          </div>
+        </details>
+      ) : null}
+
+      {selectedFarmId !== null && soil ? (
+        <SoilCropFitCard
+          farmId={selectedFarmId}
+          soil={soil}
+          climate={climate}
+          cropFit={cropFit}
+          onSaved={() => {
+            if (selectedFarmId === null) return;
+            void api
+              .getFarmPlan(selectedFarmId, currentCropId)
+              .then((result) => setPlan(result))
+              .catch(() => undefined);
+          }}
+          compact
         />
       ) : null}
 
@@ -796,10 +603,14 @@ export function CropsView() {
         {currentReportLoading ? (
           <div className="card h-40 animate-pulse-soft" aria-label={t("Loading weekly plan")} />
         ) : currentReport ? (
-          <ReportCard
+          <WeeklyPlanCard
             report={currentReport}
             crop={selectedCrop}
             pestLevel={pest?.level ?? null}
+            generating={generatingId === selectedCrop.id}
+            onRefresh={
+              selectedCrop ? () => handleGenerate(selectedCrop.id) : undefined
+            }
           />
         ) : (
           <EmptyState

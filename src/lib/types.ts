@@ -3,6 +3,8 @@
  * This module must stay free of server-only imports so it can be used anywhere.
  */
 
+import type { SoilTestInput } from "./soil";
+
 /** A geographic point stored as `[latitude, longitude]`. */
 export type GeoPoint = [number, number];
 
@@ -27,6 +29,8 @@ export interface FarmDTO {
   centroidLat: number;
   centroidLng: number;
   areaAcres: number | null;
+  /** Values from the farmer's Soil Health Card, when entered. */
+  soil: SoilTestInput | null;
   createdAt: string | null;
 }
 
@@ -49,6 +53,8 @@ export interface WeeklyReportDTO {
   cropId: number | null;
   cropName: string | null;
   aiActionPlan: string;
+  /** The same plan in Odia; null when it could not be generated. */
+  aiActionPlanOr?: string | null;
   weatherSummary: unknown;
   createdAt: string | null;
   /** Where the advisory came from. */

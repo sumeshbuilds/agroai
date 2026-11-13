@@ -1,0 +1,1 @@
+ALTER TABLE "weekly_reports" ADD COLUMN "ai_action_plan_or" text;

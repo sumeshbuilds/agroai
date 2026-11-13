@@ -1,6 +1,6 @@
 # AgroAI — Implementation Progress Report
 
-_Last updated: 27 October 2026_
+_Last updated: 13 November 2026_
 
 This document tracks progress against the root spec files:
 [`README.md`](./README.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md),
@@ -935,3 +935,97 @@ npm run dev           → all routes compile; /login, /watch, /camera, /, /map, 
 | Tests | `tests/camera/*.test.ts`, `package.json` (`test:camera`) |
 | i18n / docs | `src/lib/i18n/dictionary/watch.ts`, `camera.ts`, `patterns.ts`, `LIVE_CAMERA.md` |
 
+---
+
+## 14. Farm intelligence, soil fit, daily checklist, event-only camera & classifier consensus (13 Nov 2026)
+
+**Why**
+
+The pilot could draw a field, read a forecast and scan a leaf, but it could not answer the two questions a farmer asks every morning: *"Should I work today, and when?"* and *"Which crop actually suits this soil?"* This pass adds a deterministic agronomy layer, a real soil-based crop ranking, a satellite check, a much lighter camera link and a faster, multi-model plant scan.
+
+**1. Field-work intelligence (`src/lib/agro-advisory.ts`)**
+
+- Open-Meteo now returns ET₀, shortwave radiation, soil temperature, 0–7 cm and 7–28 cm soil moisture, VPD, leaf-wetness probability, gusts and daily humidity.
+- A 7-day plan gives every day a `good / caution / avoid` verdict with the reasons, plus per-operation advice for sowing, spraying, irrigation, fertilising, weeding, harvesting and scouting.
+- Spray windows are restricted to daylight, low-wind, low-leaf-wetness hours; irrigation windows to early morning; harvest windows require dry produce.
+- Adds a 7-day moisture deficit (Σ ET₀ − rain), heat-stress level, growing-degree-day total and a disease-pressure index from 72 h of leaf wetness/humidity.
+- New `WorkWindowsCard` renders the week, the operation windows and the disease/moisture blocks. It replaces the old field-outlook strip on the dashboard and appears on `/crops`.
+
+**2. Soil Health Card + crop fit (`src/lib/soil.ts`, `src/lib/climate.ts`)**
+
+- `farmlands` gained nullable soil columns: pH, EC, organic carbon, available N/P/K, sand/clay/silt and texture. Migration `0007_messy_kulan_gath.sql`; applied to the configured Neon database.
+- `POST/GET /api/farms/:id/soil` validates and saves the values; the card form accepts only values printed on an Indian Soil Health Card.
+- The engine classifies texture (simplified USDA triangle), rates pH/EC/OC/N/P/K, explains every limitation with an action, and computes a 0–100 soil-health score.
+- `recommendCrops()` ranks 22 locally relevant crops (paddy, maize, ragi, cotton, groundnut, pulses, oilseeds, vegetables, millets) against soil pH/texture/nutrients, 12-month ERA5 rainfall/temperature and the current sowing month. Every result carries reasons, cautions, sowing window and duration.
+- Without a soil test the result is capped and labelled `estimated`; the engine never invents pH, texture or a nutrient value.
+- New `SoilCropFitCard` on the dashboard, `/crops` and `/map` with the inline soil-card form.
+
+**3. Satellite field check (`src/lib/satellite.ts`)**
+
+- Optional Copernicus Data Space Sentinel-2 L2A statistics over the saved polygon (last 45 days, cloud/SCL masked).
+- Shows the observation date, NDVI, usable-pixel percentage, previous-scene comparison, trend reading and caveats. A plot under ~1 acre gets an explicit pixel-resolution warning.
+- Without `CDSE_CLIENT_ID` / `CDSE_CLIENT_SECRET` the card shows a clear "not connected" state; no synthetic NDVI is generated.
+
+**4. Daily checklist with idempotent progress (`src/lib/daily-tasks.ts`)**
+
+- Builds up to nine tasks from the crop-stage guide, forecast, pest risk and soil issues, sorted by priority and time of day. Every task shows its reason.
+- Completions are keyed `date:crop:task` in `localStorage`, pruned to 75 days, and never award XP twice. Streak counts fully completed days.
+- New `DailyChecklistCard` with progress ring, priority/category chips, deep links (scan, watch, crops, map) and a goal-directed Amazon strip.
+
+**5. Event-only camera by default**
+
+- The phone still runs COCO-SSD locally, but now uploads a photo only when a confirmed person/animal event is queued or a 35 s heartbeat is due (60 s on a weak link). Continuous preview is an explicit toggle (`agroai.camera.uploadMode`).
+- The upload loop ticks cheaply every 1.2 s and skips JPEG encoding entirely when the gate is closed, which cuts mobile data/battery use and keeps detection running.
+- Wake lock, visibility re-acquire, offline queue and confirmed-event framing are preserved. Copy now states that the page and screen must stay on.
+
+**6. Faster, multi-model plant scan**
+
+- Optional Hugging Face PlantVillage classifier (`HF_API_TOKEN`, default `linkanjarad/mobilenet_v2_1.0_224-plant-disease-identification`) runs **in parallel** with Gemini. Compatible labels can confirm a diagnosis (+0.10 confidence), add a differential, or lower confidence on disagreement.
+- The classifier is skipped when its crop does not match the farmer's crop or when its score is weak. It never creates a diagnosis on its own.
+- Groq second opinion is now reserved for genuinely weak reads (uncertain/poor/confidence <0.55) instead of every `fair` photo, which removes a common extra wait. The fallback Groq read receives the classifier label as a hint.
+- Source strings record the combination (`gemini+classifier`, `gemini+groq+classifier`, ...). The result card labels the cross-check.
+
+**7. One-call dashboard + fewer polls**
+
+- `GET /api/farm-plan?farmId=&cropId=` composes weather, warnings, agro plan, pest risk, soil analysis, crop fit, daily checklist and the shopping list in one authenticated request. Weather failure degrades the response instead of failing the panel.
+- Dashboard camera polling moved from 5 s to 15 s; the dedicated `/watch` page keeps its adaptive fast poll.
+- `/crops` now makes one plan request instead of separate weather + pest requests.
+
+**Verification**
+
+```
+npm run typecheck   → 0 errors
+npm run lint        → 0 errors (1 pre-existing i18n warning)
+npm test            → camera + disease + 19 new agronomy tests pass
+npm run build       → succeeds (32 routes; /api/farm-plan, /api/farms/[id]/soil, /api/satellite added)
+```
+
+Live e2e (production server, Neon, real Open-Meteo):
+
+| Check | Result |
+| --- | --- |
+| Draw farm + register farmer | `201`, 2.869 acres |
+| `GET /api/farm-plan` before soil | `200` — 6 ranked crops, 7 workable days, 6 tasks, 4 shop items |
+| `POST /api/farms/:id/soil` (pH 5.9, OC 0.42, clay loam) | `200` — 3 issues, score 68 |
+| `GET /api/farm-plan` after soil | `200` — top crop Paddy (Rice) 89 / best fit; soil issues `ph-low, organic-carbon, nutrients`; 8 tasks |
+| `GET /api/satellite` without CDSE keys | `200` — `configured:false`, `SATELLITE_NOT_CONFIGURED` |
+| `GET /api/weather` | `200` — ET₀ 3.6 mm, 72 hourly agro rows, gusts 20.5 km/h |
+| Unauthenticated farm plan / invalid soil | `401` / `400 SOIL_EMPTY` |
+| Test rows removed afterwards | ✅ |
+
+**Not verified here:** a real HF classifier response (no token in this environment) and a real CDSE scene (no OAuth client). Both paths fail soft and are covered by type/build checks; the classifier mapping/consensus logic has unit tests.
+
+**Accuracy honesty:** "97 %" is a PlantVillage-style laboratory benchmark, not a guarantee for field photos. This build improves real-world reliability with consensus, a photo-quality gate, crop-stage/weather context and conservative uncertainty; it does not claim a validated 97 % field accuracy. A local validation set and a reviewed crop–pest–formulation catalog are still required before marketing an accuracy number.
+
+**Files added / changed**
+
+| Area | Files |
+| --- | --- |
+| Engines | `agro-advisory.ts`, `soil.ts`, `climate.ts`, `daily-tasks.ts`, `satellite.ts`, `disease-classifier.ts` |
+| Data | `src/db/schema.ts`, `src/lib/queries.ts`, `drizzle/0007_messy_kulan_gath.sql` |
+| APIs | `api/farm-plan`, `api/farms/[id]/soil`, `api/satellite`, `api/disease/detect` (classifier wiring), `api/cron/weekly-report` (agro + soil context) |
+| UI | `WorkWindowsCard`, `DailyChecklistCard`, `SoilCropFitCard`, `SatelliteCard`, `DashboardView`, `CropsView`, `MapView`, `CameraStreamView`, `DiseaseResultCard`, `ReportCard` |
+| Client | `api-client.ts`, `farm-plan.ts`, `hooks/use-daily-tasks.ts` |
+| Tests / docs | `tests/agro/*`, `package.json` (`test:agro`), `.env.example`, `ARCHITECTURE.md`, this file |
+
+**Operational note:** the soil columns were applied directly to the linked Neon branch because the sandbox shell is non-interactive. `npm run db:push` should now report no changes; the generated migration file is kept for other environments.

@@ -9,6 +9,7 @@ import { GUIDE_B } from "./guide-b";
 import { MAP } from "./map";
 import { PEST } from "./pest";
 import { SETUP } from "./setup";
+import { TODAY } from "./today";
 import { WATCH } from "./watch";
 
 /** Odia dictionary, keyed by the exact English source string. */
@@ -25,6 +26,7 @@ export const ODIA: Record<string, string> = {
   ...GUIDE_B,
   ...PEST,
   ...SETUP,
+  ...TODAY,
 };
 
 export { PATTERNS } from "./patterns";

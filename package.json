@@ -11,7 +11,8 @@
     "typecheck": "tsc --noEmit",
     "test:camera": "tsx --test tests/camera/*.test.ts",
     "test:disease": "tsx --test tests/disease/*.test.ts",
-    "test": "npm run test:camera && npm run test:disease",
+    "test:agro": "tsx --test tests/agro/*.test.ts",
+    "test": "npm run test:camera && npm run test:disease && npm run test:agro",
     "db:generate": "drizzle-kit generate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio"

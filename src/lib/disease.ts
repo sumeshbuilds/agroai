@@ -98,7 +98,14 @@ export interface DiseaseAnalysis {
   monitoring: string | null;
 }
 
-export type DiseaseAnalysisSource = "gemini" | "groq" | "gemini+groq";
+export type DiseaseAnalysisSource =
+  | "gemini"
+  | "groq"
+  | "classifier"
+  | "gemini+groq"
+  | "gemini+classifier"
+  | "groq+classifier"
+  | "gemini+groq+classifier";
 
 export interface DiseaseScanDTO extends DiseaseAnalysis {
   id: number;

@@ -45,15 +45,18 @@ export function sampleCameraLuminance(
  */
 export async function encodeCameraFrame(
   snapshot: CameraFrameSnapshot, slow: boolean, deviceLabel: string,
-  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; heartbeat?: boolean } = {},
 ): Promise<PendingCameraFrame> {
   options.signal?.throwIfAborted();
   if (snapshot.canvas.width <= 0 || snapshot.canvas.height <= 0) throw new Error("Camera frame has no pixels.");
   const active = snapshot.detections.some((item) => !item.coasting);
   // The detector still runs on a 720 px canvas; only the dashboard preview is
   // downscaled. 480/400 px roughly halves the per-frame bytes versus the old
-  // 560/460 px set while staying readable on a laptop.
-  const targetWidth = active ? slow ? 320 : 480 : slow ? 280 : 400;
+  // 560/460 px set while staying readable on a laptop. A heartbeat is a tiny
+  // liveness thumbnail (≤220 px), not a monitoring image.
+  const targetWidth = options.heartbeat
+    ? slow ? 160 : 220
+    : active ? slow ? 320 : 480 : slow ? 280 : 400;
   const width = Math.min(targetWidth, snapshot.canvas.width);
   const height = Math.max(1, Math.round(snapshot.canvas.height / snapshot.canvas.width * width));
   const canvas = document.createElement("canvas");
@@ -67,7 +70,7 @@ export async function encodeCameraFrame(
       ...item, box: [...item.box], path: item.path?.map(([x, y]) => [x, y]),
     })),
     capturedAt: snapshot.capturedAt, aiEnabled: snapshot.aiEnabled, motion: snapshot.motion,
-    deviceLabel, quality: slow ? "low" : active ? "high" : "balanced",
+    deviceLabel, quality: options.heartbeat ? "low" : slow ? "low" : active ? "high" : "balanced",
     ...(snapshot.geo ? { lat: snapshot.geo.lat, lng: snapshot.geo.lng } : {}),
   };
   const blob = await new Promise<Blob>((resolve, reject) => {

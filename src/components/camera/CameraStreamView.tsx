@@ -34,6 +34,7 @@ import {
 
 import { ApiError, api } from "@/lib/api-client";
 import { Button } from "@/components/ui/Button";
+import { cn } from "@/lib/cn";
 import {
   CATEGORY_COLORS,
   enrichDetection,
@@ -102,6 +103,18 @@ const UPLOAD_INTERVAL_ACTIVE = 700;
 const UPLOAD_INTERVAL_IDLE = 2_600;
 const UPLOAD_INTERVAL_SLOW = 5_000;
 const IDLE_UPLOAD_INTERVAL_SLOW = 6_500;
+/**
+ * Event-only mode: the phone keeps detecting locally and only sends a photo
+ * when a confirmed person/animal event is queued, plus a slow heartbeat so the
+ * dashboard can still show that the camera is alive. The upload loop ticks
+ * cheaply every ~1.2 s and sends nothing unless the gate opens.
+ */
+const EVENT_UPLOAD_INTERVAL_ACTIVE = 700;
+const EVENT_UPLOAD_INTERVAL_SLOW = 1_400;
+const EVENT_LOOP_INTERVAL = 1_200;
+const EVENT_HEARTBEAT_MS = 35_000;
+const EVENT_HEARTBEAT_SLOW_MS = 60_000;
+const UPLOAD_MODE_KEY = "agroai.camera.uploadMode";
 
 function deviceLabel(): string {
   if (typeof navigator === "undefined") return "Camera";
@@ -168,6 +181,8 @@ export function CameraStreamView() {
   const uploadMsRef = useRef(0);
   const uploadFailuresRef = useRef(0);
   const lastUploadedSnapshotRef = useRef<CameraFrameSnapshot | null>(null);
+  const lastUploadAtRef = useRef(0);
+  const uploadModeRef = useRef<"events" | "live">("events");
   const distantScanRef = useRef(false);
   const cameraMovingRef = useRef(false);
   const motionRef = useRef(0);
@@ -203,6 +218,7 @@ export function CameraStreamView() {
   const [groqQueued, setGroqQueued] = useState(false);
 
   const [uploads, setUploads] = useState(0);
+  const [uploadMode, setUploadMode] = useState<"events" | "live">("events");
   const [motionPct, setMotionPct] = useState(0);
   const [gps, setGps] = useState<GeoState | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
@@ -228,6 +244,28 @@ export function CameraStreamView() {
   }));
 
   const isEnded = pairing?.session.status === "ended";
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const stored = window.localStorage.getItem(UPLOAD_MODE_KEY);
+      const mode = stored === "live" ? "live" : "events";
+      uploadModeRef.current = mode;
+      setUploadMode(mode);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const changeUploadMode = (mode: "events" | "live") => {
+    uploadModeRef.current = mode;
+    setUploadMode(mode);
+    try {
+      window.localStorage.setItem(UPLOAD_MODE_KEY, mode);
+    } catch {
+      // Private mode can block storage; the in-memory mode still works.
+    }
+    // A live-preview switch should not wait for the next heartbeat.
+    lastUploadAtRef.current = 0;
+  };
   const linkError =
     mounted && !token
       ? "This page needs a camera link. Open Live Watch on the laptop and scan its QR code."
@@ -370,6 +408,7 @@ export function CameraStreamView() {
     controlBusyRef.current = false;
     setControlBusy(false);
     lastUploadedSnapshotRef.current = null;
+    lastUploadAtRef.current = 0;
     // Confirmed event frames remain queued across a stop/flip. Only a
     // successful upload removes them; stale async work cannot replace them.
 
@@ -741,6 +780,21 @@ export function CameraStreamView() {
 
     const generation = generationRef.current;
     const accept = () => activeRef.current && runningRef.current && generation === generationRef.current;
+
+    if (uploadModeRef.current === "events") {
+      const queued = eventBufferRef.current.size > 0;
+      const heartbeat =
+        profile.slow || uploadFailuresRef.current > 0
+          ? EVENT_HEARTBEAT_SLOW_MS
+          : EVENT_HEARTBEAT_MS;
+      // Event-only mode: no photo leaves the phone unless a confirmed
+      // person/animal is queued or the slow heartbeat is due. Encoding a JPEG
+      // is the expensive part, so the gate runs before the encoder.
+      if (!queued && performance.now() - lastUploadAtRef.current < heartbeat) {
+        return;
+      }
+    }
+
     uploadBusyRef.current = true;
     const controller = new AbortController();
     uploadControllerRef.current = controller;
@@ -762,7 +816,12 @@ export function CameraStreamView() {
       if (!queued && (!snapshot || snapshot === lastUploadedSnapshotRef.current)) return;
       const frame = queued
         ? await eventBufferRef.current.next(controller.signal)
-        : await encodeCameraFrame(snapshot!, degraded, deviceLabel(), { signal: controller.signal });
+        : await encodeCameraFrame(snapshot!, degraded, deviceLabel(), {
+            signal: controller.signal,
+            // In event-only mode the periodic upload is a tiny liveness
+            // thumbnail. Full-size frames are reserved for confirmed events.
+            heartbeat: uploadModeRef.current === "events",
+          });
       if (!accept() || !frame) return;
       controller.signal.throwIfAborted();
       phase = "upload";
@@ -774,6 +833,7 @@ export function CameraStreamView() {
       uploadFailuresRef.current = 0;
       if (queued) eventBufferRef.current.complete(frame);
       else if (snapshot) lastUploadedSnapshotRef.current = snapshot;
+      lastUploadAtRef.current = performance.now();
       setBacklog(eventBufferRef.current.size);
       setUploads((count) => count + 1);
       setUploadState("ok");
@@ -870,7 +930,20 @@ export function CameraStreamView() {
       if (!alive()) return;
       const profile = networkProfile();
       const active = trackerRef.current.size > 0 || eventBufferRef.current.size > 0;
-      const base = profile.slow ? active ? UPLOAD_INTERVAL_SLOW : IDLE_UPLOAD_INTERVAL_SLOW : active ? UPLOAD_INTERVAL_ACTIVE : UPLOAD_INTERVAL_IDLE;
+      const eventMode = uploadModeRef.current === "events";
+      const base = eventMode
+        ? active
+          ? profile.slow
+            ? EVENT_UPLOAD_INTERVAL_SLOW
+            : EVENT_UPLOAD_INTERVAL_ACTIVE
+          : EVENT_LOOP_INTERVAL
+        : profile.slow
+          ? active
+            ? UPLOAD_INTERVAL_SLOW
+            : IDLE_UPLOAD_INTERVAL_SLOW
+          : active
+            ? UPLOAD_INTERVAL_ACTIVE
+            : UPLOAD_INTERVAL_IDLE;
       const cadence = profile.online
         ? uploadCadenceMs({
             baseIntervalMs: base,
@@ -1306,7 +1379,7 @@ export function CameraStreamView() {
                 <h2 className="text-xl font-semibold">{t("Point at your field")}</h2>
                 <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-slate-300">
                   {t(
-                    "People and animals are tracked on this phone. Alarm timing depends on the phone, connection and dashboard polling.",
+                    "People and animals are tracked on this phone. In event-only mode it sends a photo only when something is confirmed, so it can stay open on mobile data. Keep this page open and the screen on.",
                   )}
                 </p>
               </div>
@@ -1399,6 +1472,40 @@ export function CameraStreamView() {
                 label={t("GPS")}
                 value={gps ? `±${Math.round(gps.accuracy)} ${t("m")}` : "—"}
               />
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3.5">
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-sm font-semibold">
+                  <Zap className="h-3.5 w-3.5 text-emerald-300" />
+                  {t("Event-only photos")}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  {uploadMode === "events"
+                    ? t("The camera stays open and detects on the phone. A full photo is sent only when a person or animal is confirmed; a tiny 35 s thumbnail keeps the link alive.")
+                    : t("Live preview mode sends regular photos. It uses more mobile data and battery.")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={uploadMode === "events"}
+                aria-label={t("Event-only photos")}
+                onClick={() =>
+                  changeUploadMode(uploadMode === "events" ? "live" : "events")
+                }
+                className={cn(
+                  "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+                  uploadMode === "events" ? "bg-emerald-500" : "bg-slate-600",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
+                    uploadMode === "events" ? "translate-x-5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
             </div>
 
             <div className="flex flex-wrap gap-2">

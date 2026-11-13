@@ -123,27 +123,31 @@ Laptop /watch + dashboard
 
 ### Why it feels live
 
+- **Event-only photos are the default.** The phone still detects on every
+  inference tick, but it uploads a **full photo only when a confirmed
+  person/animal event is queued**. Otherwise it sends a tiny ≤220 px liveness
+  thumbnail every 35 s (60 s on a weak link). Flip the toggle on the phone to
+  "live preview" if you want a continuous stream for a demo.
 - Frames are versioned with `?v=<timestamp>` and cached, so the browser only
   downloads a new image when the phone sends one. Hidden tabs poll metadata
-  only, so an idle dashboard does not keep downloading JPEGs.
+  only, so an idle dashboard does not keep downloading JPEGs. The preview can
+  therefore stay still between events — that is expected, not a disconnect.
 - The player polls at ~0.8 s (2.5 s on a slow link) and backs off exponentially
-  when metadata/frame requests fail. The phone uploads every 0.7 s while
-  something is moving (2.6 s when idle) on a good link, and stretches the gap
-  automatically when measured upload time or failures require it. Expected
-  glass-to-glass latency is **1.5–2.5 s** on a normal connection.
-- Inference runs on a 416 px copy and only every 350 ms when there is movement,
-  so the phone keeps ~25–30 fps for the preview instead of stuttering.
+  when metadata/frame requests fail.
+- Inference runs on a 416 px copy and every 350 ms when there is movement, so
+  the phone keeps the preview responsive without burning the battery on a
+  static scene.
 - Boxes animate between positions with a 300 ms CSS transition, so movement looks
   smooth even at ~1 fps.
 
 ### Why it is private / low-bandwidth
 
 - Raw video never leaves the phone.
-- Frames shrink to 320–560 px and quality 0.34–0.65 on weak links; a typical
-  frame is ~20–60 KB. On `saveData`, `2g`, `slow-2g`, a measured upload over
-  2.5 s or a failed attempt, the phone switches to the smaller/cheaper frame and
-  stretches the upload interval (up to ~30 s) instead of saturating the link.
-  A hung upload is aborted after 14–25 s, then retried with exponential backoff.
+- Event frames shrink to 320–480 px and quality 0.34–0.52 on weak links; a
+  typical event frame is ~20–50 KB. Heartbeat thumbnails are ≤220 px and only a
+  few KB. On `saveData`, `2g`, `slow-2g`, a measured upload over 2.5 s or a
+  failed attempt, the phone switches to the smaller/cheaper frame and stretches
+  the upload interval instead of saturating the link.
 - JPEGs are posted as `multipart/form-data`, not base64, saving ~33 % bandwidth.
 - Only the newest frame is stored per session. Detections are one row per
   **confirmed** human/animal, not per frame.

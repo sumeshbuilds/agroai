@@ -12,6 +12,22 @@ function toIso(value: Date | string | null | undefined): string | null {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+const DISEASE_SOURCES: DiseaseAnalysisSource[] = [
+  "gemini",
+  "groq",
+  "classifier",
+  "gemini+groq",
+  "gemini+classifier",
+  "groq+classifier",
+  "gemini+groq+classifier",
+];
+
+function toSource(value: string): DiseaseAnalysisSource {
+  return DISEASE_SOURCES.includes(value as DiseaseAnalysisSource)
+    ? (value as DiseaseAnalysisSource)
+    : "gemini";
+}
+
 function toDiseaseScanDTO(
   scan: Omit<DiseaseScan, "farmerId" | "imageMime" | "imageData">,
 ): DiseaseScanDTO {
@@ -41,12 +57,7 @@ function toDiseaseScanDTO(
     lookAlikes: scan.lookAlikes ?? [],
     differentials: scan.differentials ?? [],
     monitoring: scan.monitoring ?? null,
-    source:
-      scan.source === "groq"
-        ? "groq"
-        : scan.source === "gemini+groq"
-          ? "gemini+groq"
-          : "gemini",
+    source: toSource(scan.source),
     model: scan.model,
     imageUrl: `/api/disease/scans/${scan.id}/image`,
     createdAt: toIso(scan.createdAt),

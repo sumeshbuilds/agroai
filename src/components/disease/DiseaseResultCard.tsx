@@ -27,6 +27,7 @@ import {
   type DiseaseScanDTO,
 } from "@/lib/disease";
 import { formatDateTime } from "@/lib/format";
+import { useOdiaText } from "@/lib/hooks/use-odia-text";
 import { useI18n } from "@/lib/i18n";
 
 const STATUS_STYLE = {
@@ -73,6 +74,19 @@ export function DiseaseResultCard({
   const spread = SPREAD_RISK_META[scan.spreadRisk];
   const imageQuality = IMAGE_QUALITY_META[scan.imageQuality];
   const notPlant = scan.subject === "not_plant";
+  const say = useOdiaText([
+    scan.summary,
+    scan.retakeAdvice,
+    scan.monitoring,
+    scan.diseaseName,
+    ...scan.symptoms,
+    ...scan.immediateActions,
+    ...scan.organicTreatment,
+    ...scan.chemicalTreatment,
+    ...scan.prevention,
+    ...scan.lookAlikes,
+    ...scan.differentials.flatMap((item) => [item.name, item.note]),
+  ]);
 
   const title = notPlant
     ? t("This does not look like a plant")
@@ -92,11 +106,17 @@ export function DiseaseResultCard({
         : Microscope;
 
   const sourceLabel =
-    scan.source === "gemini+groq"
+    scan.source.includes("gemini") && scan.source.includes("groq")
       ? t("Gemini + Groq cross-check")
-      : scan.source === "groq"
-        ? t("Groq vision")
-        : t("Gemini vision");
+      : scan.source.includes("classifier") && scan.source.includes("gemini")
+        ? t("Gemini + image classifier")
+        : scan.source.includes("classifier") && scan.source.includes("groq")
+          ? t("Groq + image classifier")
+          : scan.source === "groq"
+            ? t("Groq vision")
+            : scan.source === "classifier"
+              ? t("Image classifier")
+              : t("Gemini vision");
 
   return (
     <article
@@ -177,7 +197,7 @@ export function DiseaseResultCard({
             loading="lazy"
           />
           <div className="min-w-0">
-            <p className="text-sm leading-relaxed">{scan.summary}</p>
+            <p className="text-sm leading-relaxed">{say(scan.summary)}</p>
             <p className="muted mt-2 text-[0.7rem] tabular-nums">
               {formatDateTime(scan.createdAt)}
             </p>
@@ -225,7 +245,7 @@ export function DiseaseResultCard({
               <p className="font-semibold text-[var(--color-ink)]">
                 {t("How to get a clearer photo")}
               </p>
-              <p className="mt-1">{scan.retakeAdvice}</p>
+              <p className="mt-1">{say(scan.retakeAdvice)}</p>
               {onRetake ? (
                 <button
                   type="button"
@@ -244,7 +264,7 @@ export function DiseaseResultCard({
           <ResultSection
             icon={<Leaf aria-hidden className="h-3.5 w-3.5" />}
             title={t("What the scan shows")}
-            items={scan.symptoms}
+            items={scan.symptoms.map(say)}
           />
         ) : null}
 
@@ -252,7 +272,7 @@ export function DiseaseResultCard({
           <ResultSection
             icon={<Sprout aria-hidden className="h-3.5 w-3.5" />}
             title={t("Do this now")}
-            items={scan.immediateActions}
+            items={scan.immediateActions.map(say)}
             ordered
           />
         ) : null}
@@ -269,7 +289,7 @@ export function DiseaseResultCard({
                 return (
                   <li key={item.name}>
                     <div className="flex items-baseline justify-between gap-3">
-                      <span className="text-sm font-medium">{item.name}</span>
+                      <span className="text-sm font-medium">{say(item.name)}</span>
                       <span className="text-[0.68rem] tabular-nums text-[var(--color-ink-soft)]">
                         {itemPercent}%
                       </span>
@@ -290,7 +310,7 @@ export function DiseaseResultCard({
                     </div>
                     {item.note ? (
                       <p className="mt-1 text-[0.7rem] leading-relaxed text-[var(--color-ink-soft)]">
-                        {item.note}
+                        {say(item.note)}
                       </p>
                     ) : null}
                   </li>
@@ -305,7 +325,7 @@ export function DiseaseResultCard({
             <ResultSection
               icon={<Leaf aria-hidden className="h-3.5 w-3.5" />}
               title={t("Low-cost / organic options")}
-              items={scan.organicTreatment}
+              items={scan.organicTreatment.map(say)}
               compact
             />
           ) : null}
@@ -324,7 +344,7 @@ export function DiseaseResultCard({
                       aria-hidden
                       className="mt-0.5 h-3 w-3 shrink-0 opacity-70"
                     />
-                    {item}
+                    {say(item)}
                   </li>
                 ))}
               </ul>
@@ -342,7 +362,7 @@ export function DiseaseResultCard({
             <CalendarClock aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
             <div>
               <p className="font-semibold">{t("Check the same plant again")}</p>
-              <p className="mt-0.5">{scan.monitoring}</p>
+              <p className="mt-0.5">{say(scan.monitoring)}</p>
             </div>
           </div>
         ) : null}
@@ -351,7 +371,7 @@ export function DiseaseResultCard({
           <ResultSection
             icon={<ShieldCheck aria-hidden className="h-3.5 w-3.5" />}
             title={t("Prevent it next time")}
-            items={scan.prevention}
+            items={scan.prevention.map(say)}
           />
         ) : null}
 
@@ -366,7 +386,7 @@ export function DiseaseResultCard({
                   key={item}
                   className="rounded-full bg-[var(--card-muted)] px-2.5 py-1 text-[0.7rem]"
                 >
-                  {item}
+                  {say(item)}
                 </span>
               ))}
             </div>
