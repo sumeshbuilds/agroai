@@ -1,6 +1,6 @@
 # AgroAI — Implementation Progress Report
 
-_Last updated: 13 November 2026_
+_Last updated: 14 November 2026_
 
 This document tracks progress against the root spec files:
 [`README.md`](./README.md), [`ARCHITECTURE.md`](./ARCHITECTURE.md),
@@ -1029,3 +1029,73 @@ Live e2e (production server, Neon, real Open-Meteo):
 | Tests / docs | `tests/agro/*`, `package.json` (`test:agro`), `.env.example`, `ARCHITECTURE.md`, this file |
 
 **Operational note:** the soil columns were applied directly to the linked Neon branch because the sandbox shell is non-interactive. `npm run db:push` should now report no changes; the generated migration file is kept for other environments.
+
+## 15. Farmer-first crops page, today's checklist in place & bilingual AI (13 Nov 2026)
+
+**The problem.** The crops page showed the day guide, two gauge rings and the
+checklist as three separate text-heavy cards, and the weekly advisory was
+English only. On a phone the checklist sat below the fold, so the one thing a
+farmer opens the page for — "what do I do today?" — was the hardest thing to
+find.
+
+**What changed.**
+
+| Area | Change |
+| --- | --- |
+| `TodayBoard` (new) | One card that opens with the crop emoji, field name, stage, sowing date and days to harvest, then a season bar, a single big verdict tile (✅ Go / ⚠️ Care / ⛔ Wait), picture tiles for water and pest watch, a 7-day go/care/wait strip, and the tap-to-tick checklist. Task detail and the reason for each task sit behind "How and why", so the default view stays pictorial. |
+| Checklist placement | The checklist now lives inside the Today board on `/crops`. The dashboard keeps its own copy; both share `useDailyTasks`, so a tick on one page shows on the other for the same farmer. |
+| Week detail | `WorkWindowsCard` (7-day table, operation windows, moisture balance) is now inside a collapsed *Best days and windows this week* block. |
+| `WeeklyPlanCard` (new) | The stored plan is split on its `## ` headings into five icon cards (💧 irrigation, 🧪 fertiliser & spraying, 🐛 pest & disease, 🚜 field-work days, 👉 next step) instead of one markdown wall. |
+| Bilingual AI | `generateWeeklyReport` now makes a second, optional Gemini call that translates the finished plan into Odia and stores it in `weekly_reports.ai_action_plan_or`. Headings are rebuilt from the English source, so the icon mapping never depends on the model. |
+| Language switch | `WeeklyPlanCard` and the dashboard field panel pick the stored Odia plan when the UI language is Odia, with a chip to flip between the two. Older English-only plans show a "refresh for Odia" note. |
+| Runtime translation | `POST /api/translate` batches short AI/rule-written sentences (plant-health advice, checklist details and reasons) into Odia, memoised in-process and cached in `localStorage` (`agroai:odia-cache:v1`). `useOdiaText` is the client hook; the static UI keeps using the dictionary. |
+| Dictionary | New `dictionary/today.ts` (~120 entries) plus pattern rules for generated reasons (`"42% rain chance on 2026-11-15"`, `"7-day moisture deficit 18 mm"`, `"High of 38°C"`, …). |
+| Reliability | Gemini calls now carry hard timeouts (25 s generation, 20 s translation). When the provider is down or slow the report falls back to the rule-based plan in ~27 s rather than hanging, and the translate route returns `200 {translations:{}}` so the page silently keeps English. |
+| Parser | `src/lib/weekly-plan.ts` holds the section parser/meta, covered by `tests/agro/weekly-plan.test.ts` (7 tests). |
+
+**Verification (13 Nov 2026).**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | clean |
+| `npm run lint` | 0 errors, 1 pre-existing warning (`i18n/core.ts`) |
+| `npm test` | 26 pass, 0 fail |
+| `npm run build` | success; `/api/translate` registered |
+| `GET /api/farm-plan?farmId=10` (pragati, Paddy day 3) | `200` — 6 tasks, 7/7 workable days |
+| `POST /api/cron/weekly-report {cropId:13}` during a Gemini 503 | `201` in 27.7 s, `source:fallback`, `aiActionPlanOr:null` |
+| `POST /api/translate` during the same outage | `200`, `{"translations":{}}` |
+| Test report rows | removed afterwards |
+
+**Follow-up run (14 Nov 2026).** Re-ran the gates on the finished tree —
+`npm run typecheck` clean, `npm run lint` 0 errors (same warning), `npm test`
+95 pass (57 camera + 12 disease + 26 agro), `npm run build` 33 routes — and
+closed the two open questions:
+
+- **Timeout behaves as documented.** With the provider still unreachable from
+  this sandbox, `generateWeeklyReport` returned the rule-based plan after
+  exactly 25.1 s (`source:fallback`, 5 sections) instead of hanging, and Odia
+  was skipped rather than delaying the farmer's plan.
+- **Bilingual path is proven.** Pointing the SDK at a local Gemini-format mock
+  (first call → English plan, second call → Odia body with *translated*
+  headings) returned `source:gemini`, 5 English sections, a genuine Odia plan
+  and the headings rebuilt to `## Irrigation` … `## Next Step`, so the icon
+  mapping is independent of the model's translation.
+
+**Still not verified:** a live, provider-written Odia plan — this sandbox
+cannot reach `generativelanguage.googleapis.com`. The first real request in an
+environment with provider access should be checked once; no code path depends
+on the sandbox mock.
+
+**Database.** `weekly_reports.ai_action_plan_or` (`text`, nullable) was added
+to the linked Neon branch; `drizzle/0008_report_odia_plan.sql` holds the DDL.
+
+**Files added**
+
+| Area | Files |
+| --- | --- |
+| UI | `components/crops/TodayBoard.tsx`, `components/crops/WeeklyPlanCard.tsx` |
+| Logic | `src/lib/weekly-plan.ts` |
+| API | `src/app/api/translate/route.ts` |
+| Client | `src/lib/hooks/use-odia-text.ts` |
+| i18n | `src/lib/i18n/dictionary/today.ts`, pattern additions in `patterns.ts` |
+| Tests / data | `tests/agro/weekly-plan.test.ts`, `drizzle/0008_report_odia_plan.sql` |

@@ -77,28 +77,39 @@ export async function POST(request: NextRequest) {
     }
 
     if (missing.length > 0) {
-      const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!.trim());
-      const model = client.getGenerativeModel({
-        model: getGeminiModel(),
-        generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
-        systemInstruction:
-          "You translate short farm-advice sentences from English to simple, spoken Odia (ଓଡ଼ିଆ) for smallholder farmers in Odisha. Keep numbers, units (mm, °C, km/h), dates and product categories exactly. Never add advice that is not in the source. Return ONLY a JSON array of strings, same order, same length, no markdown.",
-      });
+      try {
+        const client = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!.trim());
+        const model = client.getGenerativeModel(
+          {
+            model: getGeminiModel(),
+            generationConfig: { temperature: 0.1, maxOutputTokens: 4096 },
+            systemInstruction:
+              "You translate short farm-advice sentences from English to simple, spoken Odia (ଓଡ଼ିଆ) for smallholder farmers in Odisha. Keep numbers, units (mm, °C, km/h), dates and product categories exactly. Never add advice that is not in the source. Return ONLY a JSON array of strings, same order, same length, no markdown.",
+          },
+          { timeout: 20_000 },
+        );
 
-      const prompt = [
-        `Translate these ${missing.length} sentences to Odia. Return a JSON array only.`,
-        JSON.stringify(missing),
-      ].join("\n");
+        const prompt = [
+          `Translate these ${missing.length} sentences to Odia. Return a JSON array only.`,
+          JSON.stringify(missing),
+        ].join("\n");
 
-      const result = await model.generateContent(prompt);
-      const parsed = parseArray(result.response.text());
-      if (parsed && parsed.length === missing.length) {
-        missing.forEach((text, index) => {
-          const value = parsed[index]?.trim();
-          if (!value) return;
-          translations[text] = value;
-          if (cache.size < 2_000) cache.set(text, value);
-        });
+        const result = await model.generateContent(prompt);
+        const parsed = parseArray(result.response.text());
+        if (parsed && parsed.length === missing.length) {
+          missing.forEach((text, index) => {
+            const value = parsed[index]?.trim();
+            if (!value) return;
+            translations[text] = value;
+            if (cache.size < 2_000) cache.set(text, value);
+          });
+        }
+      } catch (error) {
+        // The page keeps the English sentence; translate again next time.
+        console.error(
+          "[translate] provider unavailable:",
+          error instanceof Error ? error.message : String(error),
+        );
       }
     }
 

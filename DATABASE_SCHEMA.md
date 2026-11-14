@@ -142,6 +142,8 @@ export const weeklyReports = pgTable('weekly_reports', {
   cropId: integer('crop_id').references(() => crops.id),
   weatherSummary: jsonb('weather_summary').notNull(),
   aiActionPlan: text('ai_action_plan').notNull(),
+  // Same plan in Odia; null when translation was not available.
+  aiActionPlanOr: text('ai_action_plan_or'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

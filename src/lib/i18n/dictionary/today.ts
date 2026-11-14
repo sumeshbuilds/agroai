@@ -49,6 +49,8 @@ export const TODAY: Record<string, string> = {
   "Watch {pest}": "{pest} ଉପରେ ନଜର ରଖନ୍ତୁ",
   "Checking pests...": "କୀଟ ଯାଞ୍ଚ ହେଉଛି...",
   "Not a spray order": "ଏହା ସ୍ପ୍ରେ ନିର୍ଦ୍ଦେଶ ନୁହେଁ",
+  "Watering uses the Open-Meteo soil estimate (top 0–1 cm). Pest watch is a rule engine on live weather, not a spray order.":
+    "ପାଣି ଦେବା Open-Meteo ମାଟି ଆକଳନ (ଉପର ୦–୧ ସେ.ମି.) ଉପରେ ଆଧାରିତ। କୀଟ ନଜର ପାଣିପାଗ ଉପରେ ଚାଲୁଥିବା ଏକ ନିୟମ, ସ୍ପ୍ରେ ନିର୍ଦ୍ଦେଶ ନୁହେଁ।",
   "Pest risk: {level}": "କୀଟ ବିପଦ: {level}",
 
   /* Task titles from the daily engine */

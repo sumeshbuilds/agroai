@@ -37,7 +37,10 @@ a tabbed, illustrative tour of the workstation. The signed-in app opens at
 6. **Weekly AI crop advisory** — add crops with sowing dates; Gemini produces a
    5-section action plan (irrigation, fertiliser/spray timing, pest watch, best
    field-work days, next step) using ET₀, workable days and the soil test. Falls
-   back to a rule-based plan when the Gemini API is unavailable.
+   back to a rule-based plan when the Gemini API is unavailable. Every plan is
+   written in **English and Odia**, so the language switch changes the advisory
+   itself. The crops page shows it as icon cards, beside today's tap-to-tick
+   checklist and one go/care/wait verdict.
 7. **Live field camera (real, not simulated)** — `/watch` pairs a phone with a
    QR code. The phone runs **COCO-SSD on-device** and tracks **only humans and
    animals** (vehicles and generic motion are filtered out). A track is logged
@@ -182,6 +185,7 @@ drizzle/                     # generated SQL migrations
 | `DELETE` | `/api/disease/scans/:id` | Remove a saved scan. |
 | `GET` | `/api/disease/scans/:id/image` | The auth-scoped scan JPEG. |
 | `GET` | `/api/reports` | List weekly reports. |
+| `POST` | `/api/translate` | Batch-translate short runtime sentences to Odia (`{texts: string[]}`). Returns `{translations: {[english]: odia}}`; empty when the AI provider is unavailable. |
 | `GET` / `POST` | `/api/cron/weekly-report` | Generate weekly advisories. |
 
 ## Notes

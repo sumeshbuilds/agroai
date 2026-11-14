@@ -6,6 +6,10 @@ import type { SoilAnalysis } from "./soil";
 import type { DailyForecast, WeatherSnapshot } from "./weather";
 
 export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+/** Hard cap so a slow model call falls back instead of hanging the route. */
+const GENERATION_TIMEOUT_MS = 25_000;
+/** Translation is a second, optional call: keep the route under 60 s. */
+const TRANSLATION_TIMEOUT_MS = 20_000;
 
 export interface WeeklyReportInput {
   cropName: string;
@@ -61,12 +65,15 @@ export async function generateWeeklyReport(
 
   try {
     const client = new GoogleGenerativeAI(apiKey);
-    const generativeModel = client.getGenerativeModel({
-      model,
-      generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
-      systemInstruction:
-        "You are an experienced agricultural extension officer advising smallholder farmers in India. Be specific, practical and brief. Always answer in clear, simple English.",
-    });
+    const generativeModel = client.getGenerativeModel(
+      {
+        model,
+        generationConfig: { temperature: 0.4, maxOutputTokens: 1024 },
+        systemInstruction:
+          "You are an experienced agricultural extension officer advising smallholder farmers in India. Be specific, practical and brief. Always answer in clear, simple English.",
+      },
+      { timeout: GENERATION_TIMEOUT_MS },
+    );
 
     const result = await generativeModel.generateContent(buildPrompt(input));
     const text = result.response.text().trim();
@@ -82,23 +89,14 @@ export async function generateWeeklyReport(
     console.error("[gemini] generation failed, using fallback:", message);
 
     const fallback = buildFallbackPlan(input);
-    let actionPlanOr: string | null = null;
-    try {
-      actionPlanOr = await translatePlanToOdia(
-        new GoogleGenerativeAI(apiKey),
-        model,
-        fallback,
-      );
-    } catch {
-      actionPlanOr = null;
-    }
-
+    // No second call here: the provider is already slow or failing, and the
+    // farmer needs the English plan now. The UI offers a refresh for Odia.
     return {
       actionPlan: fallback,
-      actionPlanOr,
+      actionPlanOr: null,
       source: "fallback",
       model: "rule-based",
-      note: `Gemini call failed (${message}). Showing the built-in rule-based advisory instead.`,
+      note: "The AI service did not answer in time, so this is the built-in rule-based advisory. Refresh later for AI-written advice.",
     };
   }
 }
@@ -114,18 +112,26 @@ async function translatePlanToOdia(
   plan: string,
 ): Promise<string | null> {
   try {
-    const translator = client.getGenerativeModel({
-      model,
-      generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
-      systemInstruction:
+    const translator = client.getGenerativeModel(
+      {
+        model,
+        generationConfig: { temperature: 0.2, maxOutputTokens: 2048 },
+        systemInstruction:
         "You translate farm advisories from English to simple, spoken Odia (ଓଡ଼ିଆ) that a village farmer understands. Keep numbers, units, weekday names in Odia, and crop names in common Odia. Keep every line starting with '## ' exactly as in the input, in English. Output only the translation.",
-    });
+      },
+      { timeout: TRANSLATION_TIMEOUT_MS },
+    );
     const result = await translator.generateContent(plan);
     const text = result.response.text().trim();
-    const hasOdia = /[\u0B00-\u0B7F]/.test(text);
-    const headings = (text.match(/^##\s/gm) ?? []).length;
-    const sourceHeadings = (plan.match(/^##\s/gm) ?? []).length;
-    return hasOdia && headings === sourceHeadings ? text : null;
+    if (!/[\u0B00-\u0B7F]/.test(text)) return null;
+
+    // Rebuild the headings from the English source so the UI can always map
+    // each section to its icon, even if the model translated the headings.
+    const sourceHeadings = plan.match(/^##\s+(.*)$/gm) ?? [];
+    const translatedHeadings = text.match(/^##\s+(.*)$/gm) ?? [];
+    if (sourceHeadings.length !== translatedHeadings.length) return null;
+    let index = 0;
+    return text.replace(/^##\s+.*$/gm, () => sourceHeadings[index++] ?? "");
   } catch (error) {
     console.error(
       "[gemini] odia translation failed:",

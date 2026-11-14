@@ -12,88 +12,7 @@ import {
   getWeeklyShoppingList,
 } from "@/lib/recommendations";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
-
-/**
- * Section metadata, matched on the English heading that the prompt fixes.
- * Odia headings are kept in English by the translator so this mapping is
- * language-independent.
- */
-const SECTIONS: Array<{
-  match: string;
-  emoji: string;
-  label: string;
-  tone: string;
-}> = [
-  { match: "irrigation", emoji: "💧", label: "Irrigation", tone: "bg-info-100" },
-  {
-    match: "fertil",
-    emoji: "🧪",
-    label: "Fertilizer & Spraying",
-    tone: "bg-warn-100",
-  },
-  {
-    match: "pest",
-    emoji: "🐛",
-    label: "Pest & Disease Watch",
-    tone: "bg-danger-100",
-  },
-  {
-    match: "field",
-    emoji: "🚜",
-    label: "Best Field-Work Days",
-    tone: "bg-leaf-100",
-  },
-  { match: "next", emoji: "👉", label: "Next Step", tone: "bg-accent-50" },
-];
-
-interface Section {
-  heading: string;
-  body: string;
-}
-
-/** Splits "## Heading" markdown into cards; falls back to one text block. */
-function parseSections(markdown: string): Section[] {
-  const lines = markdown.split(/\r?\n/);
-  const sections: Section[] = [];
-  let current: Section | null = null;
-  const preamble: string[] = [];
-
-  for (const raw of lines) {
-    const heading = /^#{1,6}\s+(.*)$/.exec(raw.trim());
-    if (heading) {
-      if (current) sections.push(current);
-      current = { heading: heading[1].trim(), body: "" };
-      continue;
-    }
-    if (current) current.body += `${raw}\n`;
-    else preamble.push(raw);
-  }
-  if (current) sections.push(current);
-
-  if (sections.length === 0) {
-    const text = preamble.join("\n").trim();
-    return text ? [{ heading: "Plan", body: text }] : [];
-  }
-
-  const lead = preamble.join("\n").trim();
-  if (lead) sections[0].body = `${lead}\n${sections[0].body}`;
-  return sections.map((section) => ({
-    heading: section.heading,
-    body: section.body.trim(),
-  }));
-}
-
-function metaFor(heading: string) {
-  const lower = heading.toLowerCase();
-  return (
-    SECTIONS.find((entry) => lower.includes(entry.match)) ?? {
-      match: "",
-      emoji: "🌱",
-      label: heading,
-      tone: "bg-[var(--card-muted)]",
-    }
-  );
-}
+import { parsePlanSections, sectionMeta } from "@/lib/weekly-plan";
 
 export function WeeklyPlanCard({
   report,
@@ -115,7 +34,7 @@ export function WeeklyPlanCard({
   const text = showOdia ? odia! : report.aiActionPlan;
 
   const cropName = report.cropName ?? crop?.cropName ?? null;
-  const sections = parseSections(text);
+  const sections = parsePlanSections(text);
   const shopping = getWeeklyShoppingList({
     cropName: cropName ?? "your crop",
     advisory: report.aiActionPlan,
@@ -187,7 +106,7 @@ export function WeeklyPlanCard({
 
       <ol className="grid gap-2.5 lg:grid-cols-2">
         {sections.map((section, index) => {
-          const meta = metaFor(section.heading);
+          const meta = sectionMeta(section.heading);
           return (
             <li
               key={`${section.heading}-${index}`}

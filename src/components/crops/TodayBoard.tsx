@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import {
+  CalendarDays,
   Check,
   ChevronDown,
   CloudRain,
@@ -171,11 +172,21 @@ export function TodayBoard({
               <span className="chip chip-brand">{t("Day {day}", { day: guide.ageDays })}</span>
             </h2>
             <p className="muted mt-1.5 break-words text-sm">
-              {t(guide.stage.name)}
+              {crop.farmlandName ?? t("No field linked")}
               <span aria-hidden> · </span>
-              {guide.isHarvestWindow
-                ? t("Harvest window")
-                : t("{count} days to harvest", { count: guide.daysToHarvest })}
+              {t(guide.stage.name)}
+            </p>
+            <p className="muted mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums">
+              <span className="inline-flex items-center gap-1">
+                <CalendarDays className="h-3 w-3" />
+                {t("sown {date}", { date: crop.sowingDate.slice(0, 10) })}
+              </span>
+              <span aria-hidden>·</span>
+              {guide.isHarvestWindow ? (
+                <span className="chip chip-lime">{t("Harvest window")}</span>
+              ) : (
+                <span>{t("{count} days to harvest", { count: guide.daysToHarvest })}</span>
+              )}
             </p>
           </div>
         </div>
@@ -254,6 +265,12 @@ export function TodayBoard({
           footer={t("Not a spray order")}
         />
       </div>
+
+      <p className="muted px-5 pb-3 text-[0.62rem] leading-relaxed sm:px-6">
+        {t(
+          "Watering uses the Open-Meteo soil estimate (top 0–1 cm). Pest watch is a rule engine on live weather, not a spray order.",
+        )}
+      </p>
 
       {/* 7-day strip */}
       {agro ? (
