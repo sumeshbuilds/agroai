@@ -1,8 +1,22 @@
+import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 import { AuthGate } from "@/components/auth/AuthGate";
 import { AppMobile, AppRail } from "@/components/layout/AppNav";
 import { CameraAlarmBanner } from "@/components/watch/CameraAlarmBanner";
+
+/**
+ * Signed-in screens are thin, personal and gated, so they must never compete
+ * with the public landing pages in search results.
+ */
+export const metadata: Metadata = {
+  robots: {
+    index: false,
+    follow: false,
+    nocache: true,
+    googleBot: { index: false, follow: false },
+  },
+};
 
 /**
  * App shell: a fixed-height workstation. The dark rail sits on the left on

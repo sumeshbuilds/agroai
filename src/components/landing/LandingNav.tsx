@@ -8,6 +8,7 @@ const LINKS = [
   { href: "#plant-security", label: "Plant security" },
   { href: "#inside", label: "Inside AgroAI" },
   { href: "#how-it-works", label: "How it works" },
+  { href: "/odisha", label: "Odisha" },
 ];
 
 export function LandingNav({ signedIn = false }: { signedIn?: boolean }) {

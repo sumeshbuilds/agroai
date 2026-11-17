@@ -21,22 +21,35 @@ import {
 
 import { FieldConsole } from "@/components/landing/FieldConsole";
 import { FieldMapSvg } from "@/components/landing/FieldMapSvg";
+import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingNav } from "@/components/landing/LandingNav";
 import { ShowcaseTabs } from "@/components/landing/ShowcaseTabs";
 import { AgroMark } from "@/components/landing/AgroMark";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { getSessionFarmerId } from "@/lib/auth";
+import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME } from "@/lib/site";
+import { homePageSchema } from "@/lib/structured-data";
 
 export const metadata: Metadata = {
   title: {
-    absolute: "AgroAI — Your land, watched. Your crop, guided.",
+    absolute: "AgroAI Odisha — Farm Security & Crop AI for Kalinga",
   },
-  description:
-    "AgroAI turns a spare phone into a live field camera, maps your boundary from satellite imagery, and turns weather and crop stage into a short weekly plan. Built for Kalahandi, Odisha.",
+  description: SITE_DESCRIPTION,
+  alternates: { canonical: "/" },
   openGraph: {
-    title: "AgroAI — Your land, watched. Your crop, guided.",
+    title: "AgroAI Odisha — Your land, watched. Your crop, guided.",
     description:
-      "Land Security and Plant Security in one field workstation. Map, watch, scan and plan — on the phone and signal you already have.",
+      "An agricultural startup in Odisha (Kalinga): land security and plant guidance in one field workstation, on the phone and signal you already have.",
     type: "website",
+    url: "/",
+    siteName: SITE_NAME,
+    locale: SITE_LOCALE,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "AgroAI Odisha — Your land, watched. Your crop, guided.",
+    description:
+      "An agricultural startup in Odisha (Kalinga): land security and plant guidance in one field workstation.",
   },
 };
 
@@ -156,10 +169,11 @@ export default async function LandingPage() {
               </h1>
 
               <p className="mt-6 max-w-[34rem] text-[0.98rem] leading-relaxed text-[var(--color-ink-soft)] sm:text-[1.05rem]">
-                AgroAI turns a spare phone into a live field camera, maps your
-                boundary from satellite imagery, and turns this week&apos;s
-                weather and crop stage into a short, doable plan. Built for
-                Kalahandi, Odisha — and for days when the signal is weak.
+                AgroAI is an agricultural startup in Odisha, turning a spare
+                phone into a live field camera, mapping your boundary from
+                satellite imagery, and turning this week&apos;s weather and crop
+                stage into a short, doable plan. Built for Kalahandi and the
+                wider Kalinga region — and for days when the signal is weak.
               </p>
 
               <div className="mt-7 flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -225,6 +239,34 @@ export default async function LandingPage() {
                 Read the week
               </span>
             </div>
+          </div>
+        </section>
+
+        {/* Odisha / Kalinga strip ------------------------------------------- */}
+        <section
+          aria-labelledby="odisha-band"
+          className="border-b border-[var(--color-line-strong)] bg-lime-field"
+        >
+          <div className="landing-shell flex flex-col gap-3 py-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2
+                id="odisha-band"
+                className="text-[0.62rem] font-bold uppercase tracking-[0.18em] text-forest-deep/70"
+              >
+                AgroAI Odisha · Kalinga
+              </h2>
+              <p className="mt-1 max-w-2xl text-[0.95rem] font-semibold leading-snug text-forest-deep">
+                An agricultural startup in Odisha, built for small farms in
+                Kalahandi and across the Kalinga region.
+              </p>
+            </div>
+            <Link
+              href="/odisha"
+              className="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-full border border-forest-deep/25 px-4 text-[0.82rem] font-bold text-forest-deep transition-colors hover:border-forest-deep"
+            >
+              Read the Odisha story
+              <ArrowRight aria-hidden className="h-4 w-4" />
+            </Link>
           </div>
         </section>
 
@@ -570,68 +612,8 @@ export default async function LandingPage() {
         </section>
       </main>
 
-      <footer className="border-t border-[var(--color-line)] bg-paper-warm">
-        <div className="landing-shell py-10 sm:py-12">
-          <div className="grid gap-8 md:grid-cols-[1.2fr_0.7fr_0.7fr_1fr]">
-            <div>
-              <Link href="/" className="inline-flex items-center gap-2.5">
-                <AgroMark className="h-10 w-10" />
-                <span className="text-[1.2rem] font-bold tracking-[-0.03em] text-forest-deep">
-                  AgroAI
-                </span>
-              </Link>
-              <p className="mt-3 max-w-xs text-[0.78rem] leading-relaxed text-[var(--color-ink-soft)]">
-                The field workstation for small farms: land security, plant
-                guidance and a camera made from a spare phone.
-              </p>
-            </div>
-
-            <div>
-              <p className="text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[var(--color-ink-soft)]">
-                The app
-              </p>
-              <ul className="mt-3 space-y-2 text-[0.78rem] font-medium text-forest-deep">
-                <li><Link href="/onboarding" className="hover:underline">Create account</Link></li>
-                <li><Link href="/login" className="hover:underline">Sign in</Link></li>
-                <li><a href="#inside" className="hover:underline">Inside AgroAI</a></li>
-              </ul>
-            </div>
-
-            <div>
-              <p className="text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[var(--color-ink-soft)]">
-                Security
-              </p>
-              <ul className="mt-3 space-y-2 text-[0.78rem] font-medium text-forest-deep">
-                <li><a href="#land-security" className="hover:underline">Land security</a></li>
-                <li><a href="#plant-security" className="hover:underline">Plant security</a></li>
-                <li><a href="#how-it-works" className="hover:underline">How it works</a></li>
-              </ul>
-            </div>
-
-            <div>
-              <p className="text-[0.62rem] font-bold uppercase tracking-[0.16em] text-[var(--color-ink-soft)]">
-                Built for
-              </p>
-              <ul className="mt-3 space-y-2 text-[0.78rem] font-medium text-forest-deep">
-                <li>Weak connections</li>
-                <li>Outdoor sunlight</li>
-                <li>Odia + English</li>
-              </ul>
-            </div>
-          </div>
-
-          <div className="mt-9 flex flex-col gap-3 border-t border-[var(--color-line)] pt-5 text-[0.68rem] leading-relaxed text-[var(--color-ink-soft)] sm:flex-row sm:items-end sm:justify-between">
-            <p>
-              © 2026 AgroAI · Pilot build in Kalahandi, Odisha. Field data stays
-              scoped to the signed-in farmer.
-            </p>
-            <p className="max-w-md sm:text-right">
-              Guidance is advisory, not a field measurement. Confirm treatment and
-              pesticide decisions locally before acting.
-            </p>
-          </div>
-        </div>
-      </footer>
+      <JsonLd data={homePageSchema} />
+      <LandingFooter />
     </>
   );
 }

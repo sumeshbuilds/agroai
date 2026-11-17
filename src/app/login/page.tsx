@@ -4,6 +4,7 @@ import { LoginPageView } from "@/components/auth/LoginPageView";
 
 export const metadata: Metadata = {
   title: "Welcome back",
+  robots: { index: false, follow: false },
 };
 
 export default function LoginPage() {
