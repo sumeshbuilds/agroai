@@ -99,7 +99,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#18291f",
+  themeColor: "#164027",
 };
 
 // The root layout personalises <html lang> from the language cookie, so the

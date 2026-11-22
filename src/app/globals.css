@@ -69,16 +69,17 @@
   --color-soil-700: #805d37;
 
   /* Chrome */
-  --color-rail: #18291f;
+  --color-rail: #164027;
   --color-rail-soft: #aebcaf;
-  --color-rail-hover: #2a3d30;
+  --color-rail-hover: #234f38;
 
   /* Marketing surface — the approved Farm Guardian accents, used with
      restraint on the public page so the workstation stays the reference. */
   --color-paper-warm: #f5f1e6;
-  --color-forest-deep: #11261b;
+  --color-forest-deep: #164027;
   --color-lime-field: #c9f26c;
   --color-lime-soft: #e8f9c2;
+  --color-sun: #d25c34;
   --color-plum: #53369b;
   --color-plum-deep: #2b1a4d;
   --color-plum-soft: #e9e2fa;
@@ -148,6 +149,24 @@
     0 12px 28px -20px rgba(34, 54, 42, 0.22);
   --shadow-floating: 0 8px 20px -12px rgba(24, 41, 31, 0.16),
     0 24px 48px -24px rgba(24, 41, 31, 0.24);
+  /* The welcome wash: soft field colours blurred into the canvas so the first
+     screen feels like morning light rather than a flat panel. */
+  --gradient-welcome:
+    radial-gradient(
+      52rem 34rem at 4% -8%,
+      color-mix(in srgb, var(--color-lime-field) 48%, transparent),
+      transparent 62%
+    ),
+    radial-gradient(
+      44rem 30rem at 98% -12%,
+      color-mix(in srgb, var(--color-sun) 20%, transparent),
+      transparent 60%
+    ),
+    radial-gradient(
+      56rem 40rem at 50% 108%,
+      color-mix(in srgb, var(--color-leaf-300) 42%, transparent),
+      transparent 68%
+    );
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --duration-fast: 160ms;
@@ -162,7 +181,9 @@
   }
 
   body {
-    background: var(--background);
+    background-color: var(--background);
+    background-image: var(--gradient-welcome);
+    background-repeat: no-repeat;
     color: var(--foreground);
     min-height: 100dvh;
     font-family: var(--font-sans);
@@ -489,9 +510,25 @@
     flex-shrink: 0;
     align-items: center;
     justify-content: center;
-    background: var(--color-leaf-100);
+    background: var(--color-paper-warm);
     color: var(--color-rail);
     border-radius: 0.875rem;
+  }
+
+  /* Welcome wash for page shells that should not paint a flat panel. */
+  .bg-welcome {
+    background-color: var(--color-canvas);
+    background-image: var(--gradient-welcome);
+    background-repeat: no-repeat;
+  }
+
+  /* Soft colour orbs that blur into the welcome wash behind the hero. */
+  .welcome-orb {
+    position: absolute;
+    border-radius: 9999px;
+    filter: blur(72px);
+    opacity: 0.55;
+    pointer-events: none;
   }
 
   .title-icon {
@@ -673,7 +710,9 @@
     min-height: 100dvh;
     align-items: center;
     justify-content: center;
-    background: var(--background);
+    background-color: var(--color-canvas);
+    background-image: var(--gradient-welcome);
+    background-repeat: no-repeat;
   }
 
   .auth-frame {

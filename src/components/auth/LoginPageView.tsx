@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Leaf, Radar, Satellite, Sprout } from "lucide-react";
+import { Radar, Satellite, Sprout } from "lucide-react";
 
 import { LoginForm } from "@/components/auth/LoginForm";
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 import { useI18n } from "@/lib/i18n";
 
 const HIGHLIGHTS = [
@@ -35,11 +36,9 @@ export function LoginPageView() {
           <div>
             <Link href="/" className="inline-flex items-center gap-2.5">
               <span className="brand-mark h-11 w-11">
-                <Leaf className="h-5 w-5" strokeWidth={2.4} />
+                <AgroMark className="h-7 w-7" />
               </span>
-              <span className="text-lg font-semibold tracking-tight">
-                AgroAI
-              </span>
+              <AgroWordmark className="text-[1.3rem]" />
             </Link>
             <h2 className="mt-12 text-[2rem] font-medium leading-[1.2]">
               {t("The field workstation for your farm.")}
@@ -79,11 +78,9 @@ export function LoginPageView() {
           <div className="lg:hidden">
             <Link href="/" className="inline-flex min-h-11 items-center gap-2">
               <span className="brand-mark h-10 w-10">
-                <Leaf className="h-4 w-4" strokeWidth={2.4} />
+                <AgroMark className="h-6 w-6" />
               </span>
-              <span className="text-[1.05rem] font-semibold tracking-tight">
-                AgroAI
-              </span>
+              <AgroWordmark className="text-[1.15rem]" />
             </Link>
           </div>
 

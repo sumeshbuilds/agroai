@@ -1,6 +1,6 @@
 import Link from "next/link";
 
-import { AgroMark } from "./AgroMark";
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 
 /**
  * Shared public footer. Kept in one place so the homepage and the Odisha page
@@ -15,9 +15,7 @@ export function LandingFooter() {
           <div>
             <Link href="/" className="inline-flex items-center gap-2.5">
               <AgroMark className="h-10 w-10" />
-              <span className="text-[1.2rem] font-bold tracking-[-0.03em] text-forest-deep">
-                AgroAI
-              </span>
+              <AgroWordmark className="text-[1.35rem] text-forest-deep" />
             </Link>
             <p className="mt-3 max-w-xs text-[0.78rem] leading-relaxed text-[var(--color-ink-soft)]">
               The field workstation for small farms: land security, plant

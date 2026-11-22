@@ -21,7 +21,7 @@ export default function OpenGraphImage() {
           display: "flex",
           flexDirection: "column",
           justifyContent: "space-between",
-          background: "#11261b",
+          background: "#164027",
           color: "#f5f1e6",
           padding: "64px 72px",
           fontFamily: "sans-serif",
@@ -33,26 +33,26 @@ export default function OpenGraphImage() {
               width: 66,
               height: 66,
               borderRadius: 18,
-              background: "#c9f26c",
+              background: "#f5f1e6",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
-              color: "#11261b",
+              color: "#164027",
               fontSize: 40,
               fontWeight: 800,
             }}
           >
-            A
+            a
           </div>
           <div
             style={{
               display: "flex",
               fontSize: 32,
               fontWeight: 700,
-              letterSpacing: "-0.02em",
+              letterSpacing: "-0.04em",
             }}
           >
-            AgroAI
+            agroai
           </div>
           <div
             style={{

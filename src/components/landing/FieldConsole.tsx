@@ -7,7 +7,7 @@ import {
   UserRound,
 } from "lucide-react";
 
-import { AgroMark } from "./AgroMark";
+import { AgroMark } from "@/components/brand/AgroMark";
 import { FieldMapSvg } from "./FieldMapSvg";
 
 const FORECAST = [42, 58, 74, 82, 61, 48, 38];
@@ -25,7 +25,9 @@ export function FieldConsole() {
         <div className="overflow-hidden rounded-[1.35rem] bg-[#0c1912]">
           <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3.5 py-3 sm:px-4">
             <div className="flex min-w-0 items-center gap-2.5">
-              <AgroMark className="h-8 w-8 shrink-0" />
+              <span className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-paper-warm">
+                <AgroMark className="h-6 w-6" />
+              </span>
               <div className="min-w-0">
                 <p className="truncate text-[0.78rem] font-semibold text-[#f5f1e6]">
                   North field

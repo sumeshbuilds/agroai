@@ -171,7 +171,7 @@ export function ShowcaseTabs() {
             <span className="h-2 w-2 rounded-full bg-[var(--color-warn-500)]/70" />
             <span className="h-2 w-2 rounded-full bg-leaf-500/70" />
             <span className="ml-2 text-[0.68rem] font-semibold text-[var(--color-ink-soft)]">
-              AgroAI / {activeTab.label}
+              agroai / {activeTab.label}
             </span>
           </div>
           <span className="rounded-full bg-leaf-100 px-2 py-0.5 text-[0.58rem] font-bold uppercase tracking-[0.12em] text-leaf-700">

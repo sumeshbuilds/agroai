@@ -6,7 +6,6 @@ import { CalendarDays, Check, Map as MapIcon, Plus, RefreshCw, Sparkles, Sprout,
 
 import { TodayBoard } from "@/components/crops/TodayBoard";
 import { WeeklyPlanCard } from "@/components/crops/WeeklyPlanCard";
-import { SoilCropFitCard } from "@/components/dashboard/SoilCropFitCard";
 import { WorkWindowsCard } from "@/components/dashboard/WorkWindowsCard";
 import { SetupNotice } from "@/components/setup/SetupNotice";
 import { Button } from "@/components/ui/Button";
@@ -25,6 +24,7 @@ import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useFarms } from "@/lib/hooks/use-farms";
 import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/cn";
+import { FIT_RATING_META, type CropSuitability } from "@/lib/soil";
 import type { CropDTO, WeeklyReportDTO } from "@/lib/types";
 import { todayIso } from "@/lib/format";
 
@@ -70,6 +70,63 @@ function CropGlyphTile({
 }
 
 /* ------------------------------------------------------------------------- */
+/* Suggested crop tile                                                       */
+/* ------------------------------------------------------------------------- */
+
+function SuggestionButton({
+  entry,
+  selected,
+  onSelect,
+}: {
+  entry: CropSuitability;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useI18n();
+  const meta = FIT_RATING_META[entry.rating];
+  const tone =
+    meta.tone === "leaf"
+      ? "chip-lime"
+      : meta.tone === "warn"
+        ? "chip-warn"
+        : meta.tone === "danger"
+          ? "chip-danger"
+          : "chip-info";
+
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={cn(
+        "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition-colors",
+        selected
+          ? "border-leaf-600 bg-leaf-100"
+          : "border-[var(--color-line)] hover:border-accent-300 hover:bg-[var(--card-muted)]/50",
+      )}
+    >
+      <span aria-hidden className="text-xl leading-none">
+        {entry.crop.emoji}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">
+          {t(entry.crop.name)}
+        </span>
+        <span className="muted mt-0.5 block text-[0.68rem] leading-snug">
+          {entry.reasons[0] ? t(entry.reasons[0]) : t(entry.crop.note)}
+        </span>
+      </span>
+      <span className="flex shrink-0 flex-col items-end gap-1">
+        <span className={cn("chip px-1.5 py-0.5 text-[0.6rem]", tone)}>
+          {t(meta.label)}
+        </span>
+        <span className="text-xs font-bold tabular-nums">{entry.score}</span>
+      </span>
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------------- */
 /* Main view                                                                  */
 /* ------------------------------------------------------------------------- */
 
@@ -105,9 +162,13 @@ export function CropsView() {
   const [generatingId, setGeneratingId] = useState<number | null>(null);
 
   // Field intelligence for the selected crop: weather, work windows, pest
-  // risk, soil fit and the daily checklist arrive in one request.
+  // risk and the daily checklist arrive in one request.
   const [plan, setPlan] = useState<FarmPlanResponse | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
+
+  // Crop suggestions for the add-crop form, ranked for the field being planted.
+  const [suggestionPlan, setSuggestionPlan] = useState<FarmPlanResponse | null>(null);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
   const today = useClientValue(() => todayIso(), "");
   const effectiveSowingDate = sowingDate || today || "";
@@ -169,9 +230,6 @@ export function CropsView() {
   const pest = planMatches ? plan.pest : null;
   const agro = planMatches ? plan.agro : null;
   const dailyPlan = planMatches ? plan.dailyPlan : null;
-  const soil = planMatches ? plan.soil : null;
-  const climate = planMatches ? plan.climate : null;
-  const cropFit = planMatches ? plan.cropFit : [];
   const currentReport =
     reportResult?.cropId === currentCropId ? reportResult.report : null;
   const currentReportLoading =
@@ -224,9 +282,47 @@ export function CropsView() {
     };
   }, [currentCropId, reportVersion]);
 
+  // Suggestions for the add-crop form: the farm plan already ranks the crops
+  // that suit this field's rainfall and temperature.
+  useEffect(() => {
+    if (!showAdd) return;
+    const farmId = effectiveFarmlandId ? Number(effectiveFarmlandId) : null;
+    if (!farmId) return;
+    const controller = new AbortController();
+    const kickoff = window.setTimeout(() => {
+      setSuggestionsLoading(true);
+      void api
+        .getFarmPlan(farmId, null, { signal: controller.signal })
+        .then((result) => {
+          if (!controller.signal.aborted) setSuggestionPlan(result);
+        })
+        .catch(() => {
+          if (!controller.signal.aborted) setSuggestionPlan(null);
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) setSuggestionsLoading(false);
+        });
+    }, 0);
+    return () => {
+      window.clearTimeout(kickoff);
+      controller.abort();
+    };
+  }, [showAdd, effectiveFarmlandId]);
+
+  const suggestionFarmId = effectiveFarmlandId ? Number(effectiveFarmlandId) : null;
+  const suggestions =
+    suggestionFarmId !== null && suggestionPlan?.farm.id === suggestionFarmId
+      ? suggestionPlan.cropFit.slice(0, 4)
+      : [];
+
   const handleCropChoice = (value: string) => {
     setCropName(value);
     if (!durationTouched) setDurationDays(String(defaultDurationDays(value)));
+  };
+
+  const handleSuggestionChoice = (entry: CropSuitability) => {
+    setCropName(entry.crop.name);
+    if (!durationTouched) setDurationDays(String(entry.durationDays));
   };
 
   const handleAddCrop = async () => {
@@ -414,29 +510,76 @@ export function CropsView() {
             </Callout>
           ) : null}
 
-          <div className="flex flex-wrap gap-2">
-            {CROP_OPTIONS.map((option) => {
-              const selected = cropName === option;
-              return (
-                <button
-                  key={option}
-                  type="button"
-                  onClick={() => handleCropChoice(option)}
-                  aria-pressed={selected}
-                  className={cn(
-                    "btn border px-3 text-sm",
-                    selected
-                      ? "border-leaf-600 bg-leaf-100 text-leaf-700"
-                      : "btn-secondary",
-                  )}
-                >
-                  <span aria-hidden className="text-[1.05rem]">
-                    {getCropPreset(option).emoji}
+          {farms.length > 0 ? (
+            <div>
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <p className="text-sm font-medium">{t("Suggested for this field")}</p>
+                {suggestionsLoading ? (
+                  <span className="muted text-[0.7rem]">
+                    {t("Checking this field's rainfall and temperature…")}
                   </span>
-                  {t(option)}
-                </button>
-              );
-            })}
+                ) : null}
+              </div>
+
+              {suggestions.length > 0 ? (
+                <>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                    {suggestions.map((entry) => (
+                      <SuggestionButton
+                        key={entry.crop.name}
+                        entry={entry}
+                        selected={cropName === entry.crop.name}
+                        onSelect={() => handleSuggestionChoice(entry)}
+                      />
+                    ))}
+                  </div>
+                  <p className="muted mt-2 text-[0.7rem] leading-relaxed">
+                    {t("Ranked from this field's rainfall and temperature. Pick one, or choose your own crop below.")}
+                  </p>
+                </>
+              ) : !suggestionsLoading ? (
+                <p className="muted mt-2 text-xs leading-relaxed">
+                  {t("No suggestion for this field yet. Choose your own crop below.")}
+                </p>
+              ) : (
+                <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                  {Array.from({ length: 2 }).map((_, index) => (
+                    <div
+                      key={index}
+                      className="h-[4.25rem] animate-pulse-soft rounded-xl bg-[var(--card-muted)]"
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          <div>
+            <p className="text-sm font-medium">{t("Or choose your own crop")}</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {CROP_OPTIONS.map((option) => {
+                const selected = cropName === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => handleCropChoice(option)}
+                    aria-pressed={selected}
+                    className={cn(
+                      "btn border px-3 text-sm",
+                      selected
+                        ? "border-leaf-600 bg-leaf-100 text-leaf-700"
+                        : "btn-secondary",
+                    )}
+                  >
+                    <span aria-hidden className="text-[1.05rem]">
+                      {getCropPreset(option).emoji}
+                    </span>
+                    {t(option)}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="grid gap-4 sm:grid-cols-3">
@@ -556,23 +699,6 @@ export function CropsView() {
             <WorkWindowsCard agro={agro} loading={planLoading && !plan} />
           </div>
         </details>
-      ) : null}
-
-      {selectedFarmId !== null && soil ? (
-        <SoilCropFitCard
-          farmId={selectedFarmId}
-          soil={soil}
-          climate={climate}
-          cropFit={cropFit}
-          onSaved={() => {
-            if (selectedFarmId === null) return;
-            void api
-              .getFarmPlan(selectedFarmId, currentCropId)
-              .then((result) => setPlan(result))
-              .catch(() => undefined);
-          }}
-          compact
-        />
       ) : null}
 
       {/* One weekly plan for the crop currently selected */}

@@ -24,7 +24,7 @@ import { FieldMapSvg } from "@/components/landing/FieldMapSvg";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingNav } from "@/components/landing/LandingNav";
 import { ShowcaseTabs } from "@/components/landing/ShowcaseTabs";
-import { AgroMark } from "@/components/landing/AgroMark";
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 import { JsonLd } from "@/components/seo/JsonLd";
 import { getSessionFarmerId } from "@/lib/auth";
 import { SITE_DESCRIPTION, SITE_LOCALE, SITE_NAME } from "@/lib/site";
@@ -148,9 +148,17 @@ export default async function LandingPage() {
       </a>
       <LandingNav signedIn={signedIn} />
 
-      <main id="main-content" tabIndex={-1} className="bg-paper-warm outline-none">
+      <main id="main-content" tabIndex={-1} className="bg-welcome outline-none">
         {/* Hero ------------------------------------------------------------- */}
         <section className="relative overflow-hidden">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden"
+          >
+            <span className="welcome-orb -left-28 -top-32 h-[30rem] w-[30rem] bg-lime-field" />
+            <span className="welcome-orb -right-24 -top-24 h-[24rem] w-[24rem] bg-[#f0a97f]" />
+            <span className="welcome-orb -bottom-40 left-1/3 h-[26rem] w-[26rem] bg-leaf-300" />
+          </div>
           <div
             aria-hidden
             className="landing-hero-grid pointer-events-none absolute inset-y-0 left-0 right-0 opacity-60"
@@ -566,7 +574,7 @@ export default async function LandingPage() {
                     <div className="flex items-center justify-between border-b border-forest-deep/15 pb-3">
                       <span className="flex items-center gap-2 text-[0.62rem] font-bold uppercase tracking-[0.14em]">
                         <AgroMark className="h-7 w-7" />
-                        AgroAI
+                        <AgroWordmark className="text-[0.8rem]" />
                       </span>
                       <span className="text-[0.56rem] font-bold uppercase tracking-[0.16em] text-[var(--color-ink-soft)]">
                         Field pass

@@ -4,7 +4,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard,
-  Leaf,
   Map as MapIcon,
   Radar,
   ScanLine,
@@ -13,6 +12,7 @@ import {
 
 import { SignOutButton } from "@/components/auth/SignOutButton";
 import { useSessionFarmer } from "@/components/auth/session";
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 import { LanguageToggle } from "@/components/layout/LanguageToggle";
 import { useI18n } from "@/lib/i18n";
 
@@ -46,7 +46,7 @@ export function AppRail() {
         title="AgroAI"
         className="brand-mark mb-5 h-12 w-12"
       >
-        <Leaf className="h-5 w-5" strokeWidth={2.4} />
+        <AgroMark className="h-7 w-7" />
       </Link>
 
       <nav className="flex flex-1 flex-col items-center gap-2">
@@ -99,15 +99,15 @@ export function AppMobile() {
 
   return (
     <>
-      <header className="flex h-16 items-center justify-between border-b border-[var(--color-line)] bg-[var(--background)] px-4">
+      <header className="flex h-16 items-center justify-between border-b border-[var(--color-line)] bg-[var(--background)]/85 px-4 backdrop-blur">
         <Link
           href="/dashboard"
           className="flex min-h-11 items-center gap-2 text-[1.05rem] font-semibold tracking-tight"
         >
           <span className="brand-mark h-9 w-9">
-            <Leaf className="h-4 w-4" strokeWidth={2.4} />
+            <AgroMark className="h-6 w-6" />
           </span>
-          AgroAI
+          <AgroWordmark className="text-[1.2rem]" />
         </Link>
         <div className="flex items-center gap-2">
           <LanguageToggle />

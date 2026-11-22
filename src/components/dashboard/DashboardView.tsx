@@ -18,7 +18,6 @@ import {
 import { AreaPanel } from "@/components/dashboard/AreaPanel";
 import { DailyChecklistCard } from "@/components/dashboard/DailyChecklistCard";
 import { SatelliteCard } from "@/components/dashboard/SatelliteCard";
-import { SoilCropFitCard } from "@/components/dashboard/SoilCropFitCard";
 import { WorkWindowsCard, WorkWindowsSkeleton } from "@/components/dashboard/WorkWindowsCard";
 import { SetupNotice } from "@/components/setup/SetupNotice";
 import { FarmSwitcher, WorkbenchBar } from "@/components/layout/PageBar";
@@ -111,9 +110,6 @@ export function DashboardView() {
   const weather = activePlan?.weather ?? null;
   const warnings = activePlan?.warnings ?? [];
   const agro = activePlan?.agro ?? null;
-  const soil = activePlan?.soil ?? null;
-  const cropFit = activePlan?.cropFit ?? [];
-  const climate = activePlan?.climate ?? null;
   const dailyPlan = activePlan?.dailyPlan ?? null;
   const shopping = activePlan?.shopping ?? [];
   const weatherLoading = planLoading && !activePlan;
@@ -344,19 +340,6 @@ export function DashboardView() {
             <WorkWindowsSkeleton />
           ) : (
             <WorkWindowsCard agro={agro} loading={false} />
-          )}
-
-          {soil ? (
-            <SoilCropFitCard
-              farmId={selectedFarm.id}
-              soil={soil}
-              climate={climate}
-              cropFit={cropFit}
-              onSaved={() => void loadPlan()}
-              compact
-            />
-          ) : (
-            <div className="card h-48 animate-pulse-soft" aria-label={t("Loading soil fit")} />
           )}
 
           <SatelliteCard farmId={selectedFarm.id} />

@@ -31,7 +31,7 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
         Skip to content
       </a>
       <CameraAlarmBanner />
-      <div className="flex h-dvh overflow-hidden bg-[var(--background)]">
+      <div className="flex h-dvh overflow-hidden bg-welcome">
         <div className="sticky top-0 h-dvh shrink-0 p-4 pr-0 max-md:hidden">
           <AppRail />
         </div>

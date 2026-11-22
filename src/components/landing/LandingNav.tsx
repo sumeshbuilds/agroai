@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { ArrowRight, LayoutDashboard, LogIn } from "lucide-react";
 
-import { AgroMark } from "./AgroMark";
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 
 const LINKS = [
   { href: "#land-security", label: "Land security" },
@@ -13,7 +13,7 @@ const LINKS = [
 
 export function LandingNav({ signedIn = false }: { signedIn?: boolean }) {
   return (
-    <header className="sticky top-0 z-50 border-b border-[var(--color-line)] bg-paper-warm">
+    <header className="sticky top-0 z-50 border-b border-[var(--color-line)] bg-paper-warm/85 backdrop-blur">
       <div className="landing-shell flex h-[4.5rem] items-center justify-between gap-6">
         <Link
           href="/"
@@ -21,9 +21,7 @@ export function LandingNav({ signedIn = false }: { signedIn?: boolean }) {
           aria-label="AgroAI home"
         >
           <AgroMark className="h-10 w-10" />
-          <span className="text-[1.3rem] font-bold tracking-[-0.03em] text-forest-deep">
-            AgroAI
-          </span>
+          <AgroWordmark className="text-[1.45rem] text-forest-deep" />
         </Link>
 
         <nav aria-label="Landing page" className="hidden items-center gap-7 lg:flex">

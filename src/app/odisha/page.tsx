@@ -192,9 +192,16 @@ export default async function OdishaPage() {
       </a>
       <LandingNav signedIn={signedIn} />
 
-      <main id="main-content" tabIndex={-1} className="bg-paper-warm outline-none">
+      <main id="main-content" tabIndex={-1} className="bg-welcome outline-none">
         {/* Hero ------------------------------------------------------------- */}
         <section className="relative overflow-hidden">
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-0 overflow-hidden"
+          >
+            <span className="welcome-orb -left-28 -top-32 h-[30rem] w-[30rem] bg-lime-field" />
+            <span className="welcome-orb -right-24 -top-24 h-[24rem] w-[24rem] bg-[#f0a97f]" />
+          </div>
           <div
             aria-hidden
             className="landing-hero-grid pointer-events-none absolute inset-0 opacity-60"

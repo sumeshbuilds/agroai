@@ -10,13 +10,13 @@ import {
   CalendarDays,
   Check,
   KeyRound,
-  Leaf,
   MapPin,
   PencilRuler,
   Sprout,
   UserRound,
 } from "lucide-react";
 
+import { AgroMark, AgroWordmark } from "@/components/brand/AgroMark";
 import { Button } from "@/components/ui/Button";
 import { Callout } from "@/components/ui/Callout";
 import { ApiError, api } from "@/lib/api-client";
@@ -245,11 +245,11 @@ export function OnboardingWizard() {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6 sm:py-10">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <Link href="/login" className="flex items-center gap-2.5 text-xl font-semibold tracking-tight">
+        <Link href="/login" className="flex items-center gap-2.5">
           <span className="brand-mark h-11 w-11">
-            <Leaf className="h-5 w-5" strokeWidth={2.4} />
+            <AgroMark className="h-7 w-7" />
           </span>
-          AgroAI
+          <AgroWordmark className="text-xl" />
         </Link>
         <Link href="/login" className="btn btn-ghost text-sm">
           <span className="hidden sm:inline">{t("Already registered?")}</span> {t("Sign in")}
