@@ -19,6 +19,7 @@ import type {
   DiseaseUrgency,
   ImageQuality as DiseaseImageQuality,
   PathogenType,
+  PlantIdentification,
   SpreadRisk,
 } from "@/lib/disease";
 import type { GeoPoint } from "@/lib/types";
@@ -238,6 +239,8 @@ export const diseaseScans = pgTable(
     monitoring: text("monitoring"),
     source: text("source").notNull().default("gemini"),
     model: text("model"),
+    /** Pl@ntNet botanical identification (species + disease candidates). */
+    identification: jsonb("identification").$type<PlantIdentification | null>(),
     createdAt: timestamp("created_at").defaultNow(),
   },
   (table) => [

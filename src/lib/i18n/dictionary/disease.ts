@@ -33,8 +33,11 @@ export const DISEASE: Record<string, string> = {
   Stem: "କାଣ୍ଡ",
   "Fruit / pod": "ଫଳ / ଫଳି",
   Flower: "ଫୁଲ",
+  Fruit: "ଫଳ",
+  Bark: "ଛାଲ",
   Root: "ମୂଳ",
   "Whole plant": "ସମ୍ପୂର୍ଣ୍ଣ ଗଛ",
+  "Auto-detected": "ସ୍ୱୟଂ ଚିହ୍ନଟ",
   "What do you notice? (optional)": "ଆପଣ କଣ ଦେଖୁଛନ୍ତି? (ଇଚ୍ଛାଧୀନ)",
   "For example: brown spots started 3 days ago after rain.":
     "ଉଦାହରଣ: ବର୍ଷା ପରେ ୩ ଦିନ ପୂର୍ବରୁ ମାଟିଆ ଦାଗ ଆରମ୍ଭ ହେଲା।",
@@ -165,4 +168,21 @@ export const DISEASE: Record<string, string> = {
     "ଫଟୋ ଟିକେ ଅସ୍ପଷ୍ଟ। ପାଖକୁ ଯାଇ ଫୋନ୍ ସ୍ଥିର ରଖନ୍ତୁ।",
   "The photo is low resolution. Move closer so the affected part fills the frame.":
     "ଫଟୋର ରିଜୋଲ୍ୟୁସନ୍ କମ୍। ପ୍ରଭାବିତ ଅଂଶ ଫ୍ରେମ୍ରେ ପୂର୍ଣ୍ଣ ହେବା ପର୍ଯ୍ୟନ୍ତ ପାଖକୁ ଯାଆନ୍ତୁ।",
+
+  /* Pl@ntNet identification card */
+  "Plant identified": "ଉଦ୍ଭିଦ ଚିହ୍ନଟ ହୋଇଛି",
+  "Unnamed plant": "ଅନାମିତ ଉଦ୍ଭିଦ",
+  "Species match": "ପ୍ରଜାତି ମେଳ",
+  "Pl@ntNet disease match": "Pl@ntNet ରୋଗ ମେଳ",
+  "Other possible species": "ଅନ୍ୟ ସମ୍ଭାବ୍ୟ ପ୍ରଜାତି",
+  "Identification by Pl@ntNet": "Pl@ntNet ଦ୍ୱାରା ଚିହ୍ନଟ",
+  "Pl@ntNet could not find a plant": "Pl@ntNet କୌଣସି ଗଛ ଖୋଜି ପାଇଲା ନାହିଁ",
+  "Fill the frame with a leaf, flower or fruit and use daylight.":
+    "ଏକ ପତ୍ର, ଫୁଲ କିମ୍ବା ଫଳରେ ଫ୍ରେମ୍ ପୂରଣ କରନ୍ତୁ ଏବଂ ଦିନର ଆଲୋକ ବ୍ୟବହାର କରନ୍ତୁ।",
+  "The match is not conclusive. A closer photo of a flower or fruit usually helps.":
+    "ମେଳ ନିଶ୍ଚିତ ନୁହେଁ। ଫୁଲ କିମ୍ବା ଫଳର ପାଖ ଫଟୋ ସାଧାରଣତଃ ସହାୟକ ହୁଏ।",
+  "No disease signature matched in the Pl@ntNet database. That is not proof the plant is healthy — check the AI diagnosis below.":
+    "Pl@ntNet ଡାଟାବେସରେ କୌଣସି ରୋଗ ସଙ୍କେତ ମେଳ ଖାଇଲା ନାହିଁ। ଏହା ଗଛ ସୁସ୍ଥ ଥିବାର ପ୍ରମାଣ ନୁହେଁ — ତଳେ AI ନିର୍ଣ୍ଣୟ ଦେଖନ୍ତୁ।",
+  "{vision} + image classifier": "{vision} + ଚିତ୍ର ବର୍ଗୀକରଣ",
+  "Image classifier": "ଚିତ୍ର ବର୍ଗୀକରଣ",
 };

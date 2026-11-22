@@ -372,7 +372,7 @@ export function PlantDoctorView({
       <SectionHeading
         title={t("Plant doctor")}
         subtitle={t(
-          "Snap a leaf, stem or fruit. AI reads the photo and tells you what is likely wrong — with a short, practical action plan.",
+          "Snap a leaf, flower or fruit. Pl@ntNet names the plant and AI checks it for disease — with a short, practical action plan.",
         )}
         icon={<ScanLine aria-hidden className="h-5 w-5" />}
         action={
@@ -410,13 +410,13 @@ export function PlantDoctorView({
               <h2 className="text-lg font-semibold">{t("Scan a plant part")}</h2>
               <p className="muted mt-1 max-w-md text-sm leading-relaxed">
                 {t(
-                  "One clear photo is enough. The diagnosis and action plan appear on the right.",
+                  "One clear photo is enough. The plant name, diagnosis and action plan appear on the right.",
                 )}
               </p>
             </div>
             <span className="chip chip-brand">
               <Sparkles aria-hidden className="h-3 w-3" />
-              {t("AI vision")}
+              {t("Pl@ntNet + AI")}
             </span>
           </div>
 
@@ -510,7 +510,7 @@ export function PlantDoctorView({
                 <p className="text-sm font-semibold">
                   {preparing
                     ? t("Preparing photo…")
-                    : t("Reading the plant… this can take up to 45 seconds.")}
+                    : t("Identifying the plant and checking for disease…")}
                 </p>
               </div>
             ) : null}
@@ -665,7 +665,7 @@ export function PlantDoctorView({
             <p className="muted text-center text-[0.68rem] leading-relaxed">
               {t("This photo is private to your account.")}{" "}
               {t(
-                "The photo and result are stored in your scan history. Use a close, well-lit photo for the best result.",
+                "The photo and result are stored in your scan history. Identification by Pl@ntNet. Use a close, well-lit photo for the best result.",
               )}
             </p>
           </div>
@@ -691,7 +691,7 @@ export function PlantDoctorView({
                   <h2 className="text-lg font-semibold">{t("Photo tips")}</h2>
                   <p className="muted text-xs">
                     {t(
-                      "The AI looks for colour, spots, edges and pests, then writes a short action plan.",
+                      "Pl@ntNet names the plant; the AI looks for colour, spots and pests, then writes the action plan.",
                     )}
                   </p>
                 </div>

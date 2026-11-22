@@ -13,6 +13,7 @@ import {
   TriangleAlert,
 } from "lucide-react";
 
+import { PlantIdCard } from "@/components/disease/PlantIdCard";
 import { cn } from "@/lib/cn";
 import {
   confidencePercent,
@@ -86,6 +87,8 @@ export function DiseaseResultCard({
     ...scan.prevention,
     ...scan.lookAlikes,
     ...scan.differentials.flatMap((item) => [item.name, item.note]),
+    ...(scan.identification?.commonNames ?? []),
+    ...(scan.identification?.diseases.map((disease) => disease.label) ?? []),
   ]);
 
   const title = notPlant
@@ -93,9 +96,12 @@ export function DiseaseResultCard({
     : scan.healthStatus === "healthy"
       ? t("No disease seen in this photo")
       : scan.healthStatus === "uncertain"
-        ? scan.diseaseName ??
-          t("The photo is not clear enough to name the problem")
-        : scan.diseaseName ?? t("Possible plant health problem");
+        ? scan.diseaseName
+          ? say(scan.diseaseName)
+          : t("The photo is not clear enough to name the problem")
+        : scan.diseaseName
+          ? say(scan.diseaseName)
+          : t("Possible plant health problem");
 
   const StatusIcon = notPlant
     ? TriangleAlert
@@ -105,18 +111,26 @@ export function DiseaseResultCard({
         ? TriangleAlert
         : Microscope;
 
-  const sourceLabel =
-    scan.source.includes("gemini") && scan.source.includes("groq")
-      ? t("Gemini + Groq cross-check")
-      : scan.source.includes("classifier") && scan.source.includes("gemini")
-        ? t("Gemini + image classifier")
-        : scan.source.includes("classifier") && scan.source.includes("groq")
-          ? t("Groq + image classifier")
-          : scan.source === "groq"
-            ? t("Groq vision")
-            : scan.source === "classifier"
-              ? t("Image classifier")
-              : t("Gemini vision");
+  const hasPlantNet = scan.source.includes("plantnet");
+  const hasGemini = scan.source.includes("gemini");
+  const hasGroq = scan.source.includes("groq");
+  const hasClassifier = scan.source.includes("classifier");
+  const visionLabel = hasGemini && hasGroq
+    ? t("Gemini + Groq")
+    : hasGemini
+      ? t("Gemini")
+      : hasGroq
+        ? t("Groq vision")
+        : null;
+  const sourceLabel = hasPlantNet
+    ? visionLabel
+      ? t("Pl@ntNet + {vision}", { vision: visionLabel })
+      : t("Pl@ntNet")
+    : hasClassifier
+      ? visionLabel
+        ? t("{vision} + image classifier", { vision: visionLabel })
+        : t("Image classifier")
+      : visionLabel ?? t("Gemini vision");
 
   return (
     <article
@@ -154,6 +168,10 @@ export function DiseaseResultCard({
       </header>
 
       <div className="space-y-5 p-5">
+        {scan.identification ? (
+          <PlantIdCard identification={scan.identification} translate={say} />
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           {scan.healthStatus !== "healthy" && !notPlant ? (
             <span className="chip chip-violet">

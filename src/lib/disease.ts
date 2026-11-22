@@ -67,6 +67,57 @@ export interface DifferentialDiagnosis {
   note: string | null;
 }
 
+/** One probable species from the Pl@ntNet identification engine. */
+export interface PlantSpeciesMatch {
+  scientificName: string;
+  commonNames: string[];
+  family: string | null;
+  genus: string | null;
+  /** 0–1 match score. */
+  score: number;
+  /** GBIF species id, when Pl@ntNet returned one. */
+  gbifId: string | null;
+}
+
+/** One probable disease from the Pl@ntNet disease engine (EPPO coded). */
+export interface PlantDiseaseMatch {
+  /** EPPO code, e.g. "APHISP". */
+  code: string | null;
+  /** Human-readable label, e.g. "Aphis sp.". */
+  label: string;
+  /** 0–1 match score. */
+  score: number;
+}
+
+/**
+ * The botanical identification of a photo, as returned by the Pl@ntNet API.
+ * This is separate from the disease diagnosis: the species name is useful even
+ * when no disease is found, and vice-versa.
+ */
+export interface PlantIdentification {
+  provider: "plantnet";
+  /** Flora/referential used, e.g. "all" or "k-world-flora". */
+  project: string;
+  /** Best species match; null when Pl@ntNet could not name the plant. */
+  scientificName: string | null;
+  commonNames: string[];
+  family: string | null;
+  genus: string | null;
+  /** 0–1 match score of the best species. */
+  score: number;
+  gbifId: string | null;
+  /** Other probable species, best-first. */
+  alternatives: PlantSpeciesMatch[];
+  /** Disease candidates from the Pl@ntNet disease model. */
+  diseases: PlantDiseaseMatch[];
+  /** Organ Pl@ntNet detected in the submitted photo. */
+  organ: string | null;
+  /** Pl@ntNet engine version string. */
+  engineVersion: string | null;
+  /** True when Pl@ntNet rejected the image as a non-plant. */
+  rejected: boolean;
+}
+
 export interface DiseaseAnalysis {
   /** What the model thinks the photo actually shows. */
   subject: DiseaseSubject;
@@ -96,16 +147,24 @@ export interface DiseaseAnalysis {
   urgency: DiseaseUrgency;
   /** When to inspect the same plant again, in the farmer's words. */
   monitoring: string | null;
+  /** Botanical identification from Pl@ntNet, when available. */
+  identification?: PlantIdentification | null;
 }
 
+/**
+ * Which provider(s) produced a scan. Values are joined with "+" (for example
+ * "plantnet+gemini"), so the type stays open to new provider combinations.
+ */
 export type DiseaseAnalysisSource =
+  | "plantnet"
+  | "plantnet+gemini"
+  | "plantnet+groq"
+  | "plantnet+gemini+groq"
   | "gemini"
   | "groq"
   | "classifier"
   | "gemini+groq"
-  | "gemini+classifier"
-  | "groq+classifier"
-  | "gemini+groq+classifier";
+  | (string & {});
 
 export interface DiseaseScanDTO extends DiseaseAnalysis {
   id: number;
@@ -115,6 +174,8 @@ export interface DiseaseScanDTO extends DiseaseAnalysis {
   model: string | null;
   imageUrl: string;
   createdAt: string | null;
+  /** Always present on a scan row; null when Pl@ntNet was unavailable. */
+  identification: PlantIdentification | null;
 }
 
 export const HEALTH_STATUS_META: Record<
@@ -407,6 +468,104 @@ function maxUrgency(a: DiseaseUrgency, b: DiseaseUrgency): DiseaseUrgency {
   return urgencyRank(a) >= urgencyRank(b) ? a : b;
 }
 
+function cleanSpeciesMatches(value: unknown, maxItems = 4): PlantSpeciesMatch[] {
+  if (!Array.isArray(value)) return [];
+  const matches: PlantSpeciesMatch[] = [];
+  for (const entry of value) {
+    const record = asRecord(entry);
+    const scientificName = cleanText(
+      record.scientificName ?? record.scientific_name,
+      160,
+    );
+    if (!scientificName) continue;
+    matches.push({
+      scientificName,
+      commonNames: cleanList(record.commonNames ?? record.common_names, 5),
+      family: cleanText(record.family, 80) || null,
+      genus: cleanText(record.genus, 80) || null,
+      score: normaliseConfidence(record.score),
+      gbifId: cleanText(record.gbifId ?? record.gbif_id, 40) || null,
+    });
+    if (matches.length >= maxItems) break;
+  }
+  return matches;
+}
+
+function cleanDiseaseMatches(value: unknown, maxItems = 5): PlantDiseaseMatch[] {
+  if (!Array.isArray(value)) return [];
+  const matches: PlantDiseaseMatch[] = [];
+  for (const entry of value) {
+    if (typeof entry === "string") {
+      const label = cleanText(entry, 200);
+      if (label) matches.push({ code: null, label, score: 0 });
+    } else {
+      const record = asRecord(entry);
+      const label = cleanText(
+        record.label ?? record.description ?? record.name,
+        200,
+      );
+      if (!label) continue;
+      matches.push({
+        code: cleanText(record.code, 24) || null,
+        label,
+        score: normaliseConfidence(record.score),
+      });
+    }
+    if (matches.length >= maxItems) break;
+  }
+  return matches
+    .filter(
+      (match, index, list) =>
+        list.findIndex(
+          (candidate) => candidate.label.toLowerCase() === match.label.toLowerCase(),
+        ) === index,
+    )
+    .sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Normalises a Pl@ntNet identification block. Returns null when there is
+ * nothing worth showing, so a plain AI-only scan stays unchanged.
+ */
+export function normalisePlantIdentification(
+  value: unknown,
+): PlantIdentification | null {
+  if (!value) return null;
+  const record = asRecord(value);
+
+  const scientificName =
+    cleanText(
+      record.scientificName ??
+        record.scientific_name ??
+        record.scientificNameWithoutAuthor,
+      160,
+    ) || null;
+  const commonNames = cleanList(record.commonNames ?? record.common_names, 6);
+  const diseases = cleanDiseaseMatches(record.diseases);
+  const alternatives = cleanSpeciesMatches(
+    record.alternatives ?? record.otherResults,
+  );
+  const rejected = record.rejected === true;
+
+  if (!scientificName && diseases.length === 0 && !rejected) return null;
+
+  return {
+    provider: "plantnet",
+    project: cleanText(record.project, 60) || "all",
+    scientificName,
+    commonNames,
+    family: cleanText(record.family, 80) || null,
+    genus: cleanText(record.genus, 80) || null,
+    score: normaliseConfidence(record.score),
+    gbifId: cleanText(record.gbifId ?? record.gbif_id, 40) || null,
+    alternatives,
+    diseases,
+    organ: cleanText(record.organ, 24) || null,
+    engineVersion: cleanText(record.engineVersion ?? record.engine_version, 60) || null,
+    rejected,
+  };
+}
+
 /**
  * Turns a model reply into the exact shape the app stores and renders. Returns
  * `null` when the reply contains nothing usable, so the caller can report a
@@ -416,6 +575,9 @@ export function normaliseDiseaseAnalysis(
   value: unknown,
 ): DiseaseAnalysis | null {
   const record = asRecord(value);
+  const identification = normalisePlantIdentification(
+    record.identification ?? record.plantIdentification ?? record.plant_identification,
+  );
 
   let healthStatus = canonical(
     record.healthStatus ?? record.health_status,
@@ -423,12 +585,18 @@ export function normaliseDiseaseAnalysis(
     HEALTH_ALIASES,
     "uncertain",
   );
-  const subject = canonical(
+  let subject = canonical(
     record.subject ?? record.imageSubject ?? record.image_subject,
     DISEASE_SUBJECTS,
     SUBJECT_ALIASES,
     "unclear",
   );
+
+  // Pl@ntNet's rejection is a strong "not a plant" signal. Only let it upgrade
+  // an unclear subject — a confident vision read still wins.
+  if (identification?.rejected && subject === "unclear") {
+    subject = "not_plant";
+  }
   const imageQuality = canonical(
     record.imageQuality ?? record.image_quality,
     IMAGE_QUALITIES,
@@ -549,7 +717,8 @@ export function normaliseDiseaseAnalysis(
     !summary &&
     !diseaseName &&
     symptoms.length === 0 &&
-    immediateActions.length === 0
+    immediateActions.length === 0 &&
+    !identification
   ) {
     return null;
   }
@@ -558,7 +727,11 @@ export function normaliseDiseaseAnalysis(
     subject,
     imageQuality,
     retakeAdvice,
-    cropName: cleanText(record.cropName ?? record.crop_name, 80) || null,
+    cropName:
+      cleanText(record.cropName ?? record.crop_name, 80) ||
+      identification?.commonNames[0] ||
+      identification?.scientificName ||
+      null,
     plantPart:
       cleanText(record.plantPart ?? record.plant_part, 40) || "plant part",
     healthStatus,
@@ -584,6 +757,7 @@ export function normaliseDiseaseAnalysis(
     spreadRisk,
     urgency,
     monitoring,
+    identification,
   };
 }
 
@@ -661,6 +835,10 @@ export function mergeDiseaseAnalyses(
         urgency: maxUrgency(primary.urgency, secondary.urgency),
         monitoring: primary.monitoring ?? secondary.monitoring,
         differentials: mergedDifferentials,
+        identification: mergeIdentification(
+          primary.identification,
+          secondary.identification,
+        ),
         summary:
           primary.summary.length >= secondary.summary.length
             ? primary.summary
@@ -735,7 +913,38 @@ export function mergeDiseaseAnalyses(
           ? (loser.diseaseName ?? null)
           : winner.diseaseName,
       ),
+      identification: mergeIdentification(
+        winner.identification,
+        loser.identification,
+      ),
     }),
+  };
+}
+
+/**
+ * Keeps the richer Pl@ntNet identification when two reads are combined, and
+ * unions their disease candidates so nothing confidently found is lost.
+ */
+function mergeIdentification(
+  a: PlantIdentification | null | undefined,
+  b: PlantIdentification | null | undefined,
+): PlantIdentification | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+
+  const diseases = [...a.diseases];
+  for (const disease of b.diseases) {
+    const duplicate = diseases.some(
+      (existing) =>
+        (existing.code && disease.code && existing.code === disease.code) ||
+        existing.label.toLowerCase() === disease.label.toLowerCase(),
+    );
+    if (!duplicate) diseases.push(disease);
+  }
+
+  return {
+    ...a,
+    diseases: diseases.sort((x, y) => y.score - x.score).slice(0, 6),
   };
 }
 

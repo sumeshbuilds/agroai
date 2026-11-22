@@ -12,6 +12,7 @@ import {
   type DiseaseScanDTO,
 } from "@/lib/disease";
 import { formatDateTime } from "@/lib/format";
+import { useOdiaText } from "@/lib/hooks/use-odia-text";
 import { useI18n } from "@/lib/i18n";
 
 const DOT = {
@@ -38,6 +39,7 @@ export function DiseaseHistory({
   onDelete: (id: number) => void;
 }) {
   const { t } = useI18n();
+  const say = useOdiaText(scans.map((scan) => scan.diseaseName));
   const [pendingDeleteId, setPendingDeleteId] = useState<number | null>(null);
 
   return (
@@ -84,10 +86,18 @@ export function DiseaseHistory({
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
           {scans.map((scan) => {
             const meta = HEALTH_STATUS_META[scan.healthStatus];
+            const species = scan.identification?.scientificName ?? null;
             const title =
-              scan.healthStatus === "healthy"
-                ? t("Looks healthy")
-                : scan.diseaseName ?? t(meta.label);
+              scan.healthStatus === "diseased" && scan.diseaseName
+                ? say(scan.diseaseName)
+                : species ??
+                  (scan.healthStatus === "healthy"
+                    ? t("Looks healthy")
+                    : t(meta.label));
+            const contextParts = [
+              scan.cropName ? t(scan.cropName) : null,
+              t(plantPartLabel(scan.plantPart)),
+            ].filter((value): value is string => Boolean(value));
             const deleting = deletingId === scan.id;
             const confirming = pendingDeleteId === scan.id;
 
@@ -127,8 +137,7 @@ export function DiseaseHistory({
                         {title}
                       </span>
                       <span className="muted mt-0.5 block truncate text-xs">
-                        {scan.cropName ? t(scan.cropName) : t("Plant")} ·{" "}
-                        {t(plantPartLabel(scan.plantPart))}
+                        {contextParts.join(" · ")}
                       </span>
                       <span className="muted mt-1 flex items-center gap-1.5 text-[0.65rem] tabular-nums">
                         <span>{confidencePercent(scan.confidence)}%</span>

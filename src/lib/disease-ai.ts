@@ -9,13 +9,15 @@
  * — the route surfaces a clear error instead of saving a made-up diagnosis.
  */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
 import {
+  DEFAULT_RETAKE_ADVICE,
   mergeDiseaseAnalyses,
   normaliseDiseaseAnalysis,
+  type DifferentialDiagnosis,
   type DiseaseAnalysis,
   type DiseaseAnalysisSource,
+  type PathogenType,
+  type PlantIdentification,
   type PlantPart,
 } from "./disease";
 import {
@@ -24,7 +26,9 @@ import {
   type ClassifierSignal,
 } from "./disease-classifier";
 import { getGeminiModel } from "./gemini";
+import { generateGeminiText } from "./gemini-resilient";
 import { parseGroqJson } from "./groq";
+import { identifyWithPlantNet, isPlantNetConfigured } from "./plantnet";
 
 const GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions";
 const DEFAULT_GROQ_MODEL = "qwen/qwen3.8-27b";
@@ -33,6 +37,11 @@ const DEFAULT_GEMINI_TIMEOUT_MS = 40_000;
 const SECOND_OPINION_MAX_WAIT_MS = 12_000;
 /** Do not start a second call so late that the route hits its 60 s limit. */
 const SECOND_OPINION_START_DEADLINE_MS = 24_000;
+/**
+ * Once Pl@ntNet has identified the plant, wait at most this long for the
+ * vision model to add the diagnosis and action plan before responding anyway.
+ */
+const DEFAULT_VISION_SOFT_DEADLINE_MS = 30_000;
 
 const SYSTEM_PROMPT = [
   "You are an experienced plant pathologist helping smallholder farmers in India.",
@@ -85,12 +94,21 @@ export class DiseaseAiUnavailableError extends Error {
 
 export function isDiseaseAiConfigured(): boolean {
   return Boolean(
-    process.env.GEMINI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim(),
+    isPlantNetConfigured() ||
+      process.env.GEMINI_API_KEY?.trim() ||
+      process.env.GROQ_API_KEY?.trim(),
   );
 }
 
 function secondOpinionEnabled(): boolean {
   return process.env.DISEASE_SECOND_OPINION?.trim().toLowerCase() !== "false";
+}
+
+function visionSoftDeadlineMs(): number {
+  const value = Number(process.env.DISEASE_VISION_SOFT_DEADLINE_MS);
+  return Number.isFinite(value) && value >= 500 && value <= 55_000
+    ? value
+    : DEFAULT_VISION_SOFT_DEADLINE_MS;
 }
 
 function buildPrompt(input: AnalysePlantImageInput): string {
@@ -232,34 +250,38 @@ async function analyseWithGemini(
       ? timeoutValue
       : DEFAULT_GEMINI_TIMEOUT_MS;
 
-  const model = getGeminiModel();
-  const client = new GoogleGenerativeAI(apiKey);
-  const baseUrl = process.env.GEMINI_BASE_URL?.trim();
-  const generativeModel = client.getGenerativeModel(
-    {
-      model,
-      systemInstruction: SYSTEM_PROMPT,
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 3200,
-        responseMimeType: "application/json",
-      },
+  const primary = getGeminiModel();
+  const { text, model } = await generateGeminiText({
+    apiKey,
+    systemInstruction: SYSTEM_PROMPT,
+    generationConfig: {
+      temperature: 0.1,
+      maxOutputTokens: 3200,
+      responseMimeType: "application/json",
     },
-    { timeout, ...(baseUrl ? { baseUrl } : {}) },
-  );
-
-  const result = await generativeModel.generateContent([
-    { text: buildPrompt(input) },
-    {
-      inlineData: {
-        data: input.imageBase64,
-        mimeType: input.mimeType,
+    contents: [
+      { text: buildPrompt(input) },
+      {
+        inlineData: {
+          data: input.imageBase64,
+          mimeType: input.mimeType,
+        },
       },
+    ],
+    timeoutMs: timeout,
+    baseUrl: process.env.GEMINI_BASE_URL?.trim(),
+    onRetry: ({ model: attempted, attempt, total, error }) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.warn(
+        `[disease] Gemini attempt ${attempt}/${total} (${attempted}) failed, trying next:`,
+        message.slice(0, 160),
+      );
     },
-  ]);
+  });
 
-  const text = result.response.text().trim();
-  if (!text) throw new Error("Gemini returned an empty response.");
+  if (model !== primary) {
+    console.warn(`[disease] Gemini recovered on fallback model ${model}.`);
+  }
 
   const analysis = normaliseDiseaseAnalysis(parseJsonObject(text));
   if (!analysis) throw new Error("Gemini returned an unreadable analysis.");
@@ -360,7 +382,7 @@ function needsSecondOpinion(analysis: DiseaseAnalysis): boolean {
   );
 }
 
-type SourcePart = "gemini" | "groq" | "classifier";
+type SourcePart = "gemini" | "groq" | "classifier" | "plantnet";
 
 function combineSource(parts: SourcePart[]): DiseaseAnalysisSource {
   const unique = [...new Set(parts)];
@@ -375,23 +397,19 @@ function classifierHint(signal: ClassifierSignal | null): string | null {
 }
 
 /**
- * Reads one photo.
+ * Runs the configured vision provider(s) on one photo. Gemini is the primary
+ * explainable read; Groq is the fallback and the second opinion for weak reads.
+ * The optional Hugging Face classifier is folded in as a consensus signal.
  *
- * Gemini and the optional Hugging Face classifier start **in parallel**, so the
- * classifier costs almost no extra waiting. Gemini remains the explainable
- * primary read; the classifier only confirms, lowers confidence, or adds a
- * differential. Groq is used as a fallback and as a second opinion for weak
- * reads, and now receives the classifier hint. A failure is reported as
- * `DiseaseAiUnavailableError` so the route can return a friendly 502 without
- * persisting anything.
+ * Returns null when no vision provider is configured or every provider failed,
+ * so the caller can fall back to Pl@ntNet-only identification instead of
+ * returning an error.
  */
-export async function analysePlantImage(
+async function analyseWithVisionStack(
   input: AnalysePlantImageInput,
-): Promise<DiseaseAnalysisResult> {
-  if (!isDiseaseAiConfigured()) {
-    throw new DiseaseAiUnavailableError(
-      "The plant doctor is not configured yet. Add GEMINI_API_KEY (or GROQ_API_KEY) to .env.local and restart the server.",
-    );
+): Promise<DiseaseAnalysisResult | null> {
+  if (!process.env.GEMINI_API_KEY?.trim() && !process.env.GROQ_API_KEY?.trim()) {
+    return null;
   }
 
   const startedAt = Date.now();
@@ -524,7 +542,321 @@ export async function analysePlantImage(
     }
   }
 
+  return null;
+}
+
+/* --------------------------------------------------------------------------
+ * Pl@ntNet identification layer
+ * ------------------------------------------------------------------------ */
+
+function diagnosisKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9 ]+/g, " ")
+    .replace(/\b(the|a|an|disease|infection|problem|virus|spp?)\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function sameDiagnosisName(a: string, b: string): boolean {
+  const left = diagnosisKey(a);
+  const right = diagnosisKey(b);
+  if (!left || !right) return false;
+  return left === right || left.includes(right) || right.includes(left);
+}
+
+/** Best-effort pathogen class from a disease label, when no AI is available. */
+function inferPathogen(label: string): PathogenType {
+  const value = label.toLowerCase();
+  if (/bacteri|pseudomonas|xanthomonas|erwinia/.test(value)) return "bacterial";
+  if (/virus|mosaic|curl|viroid|tospo/.test(value)) return "viral";
+  if (/mite|aphid|thrip|whitefly|borer|worm|moth|beetle|weevil|psyllid|cocci|pest|insect/.test(value)) {
+    return "pest";
+  }
+  if (/nutrient|deficien|chloros|necrosis.*deficien/.test(value)) return "nutrient";
+  if (
+    /blight|rust|mildew|rot|spot|scab|scorch|mould|mold|fung|anthracnose|fusarium|verticillium|oidium|puccinia|phytophthora|pythium|downy|alternaria|septoria|botrytis|cercospora|oomycet/.test(
+      value,
+    )
+  ) {
+    return "fungal";
+  }
+  return "unknown";
+}
+
+function dedupeDifferentials(
+  items: DifferentialDiagnosis[],
+  primaryName: string | null,
+): DifferentialDiagnosis[] {
+  const out: DifferentialDiagnosis[] = [];
+  for (const item of items) {
+    if (!item.name) continue;
+    if (primaryName && sameDiagnosisName(item.name, primaryName)) continue;
+    if (out.some((existing) => sameDiagnosisName(existing.name, item.name))) continue;
+    out.push(item);
+  }
+  return out.sort((a, b) => b.confidence - a.confidence).slice(0, 4);
+}
+
+/**
+ * Folds a Pl@ntNet disease signal into a vision-model read. It can confirm a
+ * diagnosis, add a differential, or upgrade an uncertain read — but it never
+ * overrides a confident healthy/diseased verdict on its own.
+ *
+ * Exported for unit testing; not part of the public API.
+ */
+export function mergePlantIdentification(
+  analysis: DiseaseAnalysis,
+  identification: PlantIdentification | null,
+): DiseaseAnalysis {
+  if (!identification || identification.rejected) return analysis;
+  const best = identification.diseases[0];
+  if (!best || best.score < 0.4) return analysis;
+
+  if (analysis.diseaseName && sameDiagnosisName(analysis.diseaseName, best.label)) {
+    const boost = best.score >= 0.7 ? 0.1 : best.score >= 0.5 ? 0.06 : 0.03;
+    return { ...analysis, confidence: Math.min(0.95, analysis.confidence + boost) };
+  }
+
+  if (analysis.healthStatus === "diseased") {
+    return {
+      ...analysis,
+      differentials: dedupeDifferentials(
+        [
+          ...analysis.differentials,
+          {
+            name: best.label,
+            confidence: best.score,
+            note: "Also predicted by the Pl@ntNet disease model.",
+          },
+        ],
+        analysis.diseaseName,
+      ),
+    };
+  }
+
+  if (analysis.healthStatus === "uncertain" && best.score >= 0.5) {
+    return {
+      ...analysis,
+      healthStatus: "diseased",
+      diseaseName: best.label,
+      pathogenType: inferPathogen(best.label),
+      confidence: Math.max(analysis.confidence, Math.min(0.9, best.score)),
+      differentials: dedupeDifferentials(
+        [
+          {
+            name: best.label,
+            confidence: best.score,
+            note: "Named by the Pl@ntNet disease model.",
+          },
+          ...analysis.differentials,
+        ],
+        best.label,
+      ),
+    };
+  }
+
+  if (analysis.healthStatus === "healthy" && best.score >= 0.7) {
+    return {
+      ...analysis,
+      healthStatus: "uncertain",
+      confidence: Math.min(analysis.confidence, 0.5),
+      differentials: dedupeDifferentials(
+        [
+          {
+            name: best.label,
+            confidence: best.score,
+            note: "Pl@ntNet flagged this disease even though the photo looked healthy.",
+          },
+          ...analysis.differentials,
+        ],
+        analysis.diseaseName,
+      ),
+    };
+  }
+
+  return analysis;
+}
+
+/**
+ * Builds a complete result from Pl@ntNet alone, used when no vision provider is
+ * configured or reachable. Species identification is the headline; the disease
+ * model supplies a name when it is confident.
+ *
+ * Exported for unit testing; not part of the public API.
+ */
+export function buildPlantNetAnalysis(
+  input: AnalysePlantImageInput,
+  identification: PlantIdentification,
+): DiseaseAnalysis {
+  const rejected = identification.rejected;
+  const name = identification.scientificName;
+  const common = identification.commonNames[0] ?? null;
+  const cropName = input.cropName?.trim() || common || name;
+  const best = identification.diseases[0] ?? null;
+  const diseased = !rejected && best !== null && best.score >= 0.45;
+
+  const summary = rejected
+    ? "Pl@ntNet could not find a plant in this photo."
+    : diseased && best
+      ? `Pl@ntNet identified this as ${name ?? cropName}${common && name ? ` (${common})` : ""} and found signs of ${best.label}.`
+      : name
+        ? `Pl@ntNet identified this plant as ${name}${common ? ` (${common})` : ""}. No matching disease pattern was found in the disease database.`
+        : "Pl@ntNet could not name this plant with confidence. Try a closer photo of a leaf, flower or fruit.";
+
+  return {
+    subject: rejected ? "not_plant" : "plant",
+    imageQuality: "unknown",
+    retakeAdvice: rejected
+      ? "This photo does not clearly show a plant. Move closer to a leaf, flower or fruit and try again."
+      : name
+        ? null
+        : DEFAULT_RETAKE_ADVICE,
+    cropName,
+    plantPart: input.plantPart,
+    healthStatus: rejected ? "uncertain" : diseased ? "diseased" : "uncertain",
+    diseaseName: diseased && best ? best.label : null,
+    pathogenType: diseased && best ? inferPathogen(best.label) : "unknown",
+    severity: "unknown",
+    confidence: rejected
+      ? 0.2
+      : diseased && best
+        ? best.score
+        : Math.min(0.55, identification.score),
+    summary,
+    symptoms: [],
+    causes: [],
+    immediateActions: [],
+    organicTreatment: [],
+    chemicalTreatment: [],
+    prevention: [],
+    lookAlikes: [],
+    differentials: identification.diseases.slice(1).map((disease) => ({
+      name: disease.label,
+      confidence: disease.score,
+      note: "Also predicted by the Pl@ntNet disease model.",
+    })),
+    spreadRisk: "unknown",
+    urgency: "monitor",
+    monitoring: diseased
+      ? "Check the same plant again in 2–3 days."
+      : "Check the same plant again in 5–7 days.",
+    identification,
+  };
+}
+
+function splitSource(source: string): SourcePart[] {
+  return source
+    .split("+")
+    .map((part) => part.trim())
+    .filter(Boolean) as SourcePart[];
+}
+
+function hasVisionProvider(): boolean {
+  return Boolean(
+    process.env.GEMINI_API_KEY?.trim() || process.env.GROQ_API_KEY?.trim(),
+  );
+}
+
+/**
+ * Resolves with `promise`'s value, or null if it takes longer than `ms`. The
+ * timeout is always cleared so it never keeps the process alive.
+ */
+async function withSoftDeadline<T>(
+  promise: Promise<T>,
+  ms: number,
+): Promise<T | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => resolve(null), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Reads one photo.
+ *
+ * Pl@ntNet identifies the plant (and, when its disease model covers the crop,
+ * the disease) in parallel with the Gemini/Groq vision stack. Pl@ntNet is the
+ * identification layer; the vision model remains the explainable diagnosis and
+ * action-plan writer. When no vision provider is configured (or it fails), the
+ * Pl@ntNet result alone still produces a useful scan instead of a 502.
+ */
+export async function analysePlantImage(
+  input: AnalysePlantImageInput,
+): Promise<DiseaseAnalysisResult> {
+  if (!isDiseaseAiConfigured()) {
+    throw new DiseaseAiUnavailableError(
+      "The plant doctor is not configured yet. Add PLANTNET_API_KEY (or GEMINI_API_KEY) to .env.local and restart the server.",
+    );
+  }
+
+  const plantNetPromise = isPlantNetConfigured()
+    ? identifyWithPlantNet({
+        imageBase64: input.imageBase64,
+        mimeType: input.mimeType,
+        plantPart: input.plantPart,
+      }).catch((error: unknown) => {
+        console.warn(
+          "[disease] Pl@ntNet failed:",
+          error instanceof Error ? error.message : String(error),
+        );
+        return null;
+      })
+    : Promise.resolve(null);
+
+  const visionPromise = analyseWithVisionStack(input);
+  const plantNet = await plantNetPromise;
+  const identification = plantNet?.identification ?? null;
+
+  // If Pl@ntNet already named the plant, do not let a slow or broken vision
+  // provider hold the whole scan hostage; fall back to the identification
+  // alone after a generous soft deadline.
+  const vision = identification
+    ? await withSoftDeadline(visionPromise, visionSoftDeadlineMs())
+    : await visionPromise;
+
+  if (vision) {
+    const merged = mergePlantIdentification(vision.analysis, identification);
+    const analysis =
+      normaliseDiseaseAnalysis({ ...merged, identification }) ?? merged;
+    const parts = identification
+      ? combineSource(["plantnet", ...splitSource(vision.source)])
+      : vision.source;
+    return {
+      analysis,
+      source: parts,
+      model: identification ? `${vision.model} + plantnet` : vision.model,
+      agreed: vision.agreed,
+    };
+  }
+
+  if (identification) {
+    if (hasVisionProvider()) {
+      console.warn(
+        "[disease] vision provider failed; returning Pl@ntNet-only identification.",
+      );
+    }
+    const analysis = normaliseDiseaseAnalysis(
+      buildPlantNetAnalysis(input, identification),
+    );
+    if (analysis) {
+      return { analysis, source: "plantnet", model: "plantnet" };
+    }
+  }
+
+  // Reaching here means Pl@ntNet gave nothing usable and no vision provider
+  // answered (busy, timed out or misconfigured). The photo may be perfectly
+  // fine, so do not tell the farmer to take a closer or better-lit one.
   throw new DiseaseAiUnavailableError(
-    "The plant doctor could not read this photo right now. Please try again in a minute with a closer, well-lit photo.",
+    identification?.rejected
+      ? "The plant doctor could not find a clear plant in this photo. Move closer to a leaf, flower or fruit and try again."
+      : "The plant doctor's AI service is busy right now, so this photo could not be read. Please try again in a minute.",
   );
 }

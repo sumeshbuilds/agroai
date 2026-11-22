@@ -12,20 +12,8 @@ function toIso(value: Date | string | null | undefined): string | null {
   return value instanceof Date ? value.toISOString() : value;
 }
 
-const DISEASE_SOURCES: DiseaseAnalysisSource[] = [
-  "gemini",
-  "groq",
-  "classifier",
-  "gemini+groq",
-  "gemini+classifier",
-  "groq+classifier",
-  "gemini+groq+classifier",
-];
-
 function toSource(value: string): DiseaseAnalysisSource {
-  return DISEASE_SOURCES.includes(value as DiseaseAnalysisSource)
-    ? (value as DiseaseAnalysisSource)
-    : "gemini";
+  return value && value.trim() ? (value as DiseaseAnalysisSource) : "gemini";
 }
 
 function toDiseaseScanDTO(
@@ -61,6 +49,7 @@ function toDiseaseScanDTO(
     model: scan.model,
     imageUrl: `/api/disease/scans/${scan.id}/image`,
     createdAt: toIso(scan.createdAt),
+    identification: scan.identification ?? null,
   };
 }
 
@@ -104,6 +93,7 @@ export async function listDiseaseScans(
       monitoring: diseaseScans.monitoring,
       source: diseaseScans.source,
       model: diseaseScans.model,
+      identification: diseaseScans.identification,
       createdAt: diseaseScans.createdAt,
     })
     .from(diseaseScans)
@@ -161,6 +151,7 @@ export async function createDiseaseScan(
       lookAlikes: analysis.lookAlikes,
       differentials: analysis.differentials,
       monitoring: analysis.monitoring,
+      identification: analysis.identification ?? null,
       source: input.source,
       model: input.model,
     })

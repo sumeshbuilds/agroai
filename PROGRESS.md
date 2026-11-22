@@ -1099,3 +1099,39 @@ to the linked Neon branch; `drizzle/0008_report_odia_plan.sql` holds the DDL.
 | Client | `src/lib/hooks/use-odia-text.ts` |
 | i18n | `src/lib/i18n/dictionary/today.ts`, pattern additions in `patterns.ts` |
 | Tests / data | `tests/agro/weekly-plan.test.ts`, `drizzle/0008_report_odia_plan.sql` |
+
+---
+
+## 20. Plant doctor — Pl@ntNet identification layer (21 Nov 2026)
+
+The `/detect` plant doctor previously leaned entirely on Gemini Vision for
+disease detection with a Groq fallback. When Gemini was slow or unavailable and
+no Groq key was set, the route returned a 502 and nothing was saved. It also
+never answered the farmer's first question — *what plant is this?*
+
+**What changed.**
+
+| Area | Change |
+| --- | --- |
+| `src/lib/plantnet.ts` (new) | Server-side Pl@ntNet client. Calls `/v2/identify/{project}` (species: scientific/common names, family, genus, match score, GBIF id, alternatives, detected organ) and `/v2/diseases/identify` (EPPO-coded disease candidates) in parallel with per-request timeouts. Classifies 404 as a "not a plant" rejection, and 401/403/429/5xx as recoverable failures — it never throws. |
+| `src/lib/disease-ai.ts` | Orchestrates Pl@ntNet **and** Gemini/Groq in parallel. Pl@ntNet is the identification layer; the vision model writes the explainable diagnosis and action plan. `mergePlantIdentification` confirms, adds a differential, or upgrades an uncertain read. When the vision provider is missing, slow or broken, `buildPlantNetAnalysis` produces a complete scan from Pl@ntNet alone — no more 502. A `DISEASE_VISION_SOFT_DEADLINE_MS` soft deadline keeps the scan responsive. |
+| `src/lib/disease.ts` | New `PlantIdentification` / `PlantSpeciesMatch` / `PlantDiseaseMatch` types, `normalisePlantIdentification`, identification carried through `normaliseDiseaseAnalysis` and `mergeDiseaseAnalyses`, and an open `DiseaseAnalysisSource` (`plantnet`, `plantnet+gemini`, ...). |
+| Data | `disease_scans.identification` (`jsonb`, nullable) stores the Pl@ntNet block. Migration `0009_lovely_silver_centurion.sql`. |
+| UI | New `PlantIdCard` (species, common names, family/genus, species-match bar, detected organ, Pl@ntNet disease candidates, alternatives, attribution) shown above the diagnosis in `DiseaseResultCard`. History cards now show the identified species. `PlantDoctorView` copy and badges updated. |
+| Config | `PLANTNET_API_KEY` (plus `PLANTNET_PROJECT`, `PLANTNET_LANG`, `PLANTNET_TIMEOUT_MS`, `PLANTNET_BASE_URL`, `DISEASE_VISION_SOFT_DEADLINE_MS`) documented in `.env.example`. |
+
+**Verification (21 Nov 2026).**
+
+| Check | Result |
+| --- | --- |
+| `npm run typecheck` | clean |
+| `npm run lint` | 0 errors, 1 pre-existing warning (`i18n/core.ts`) |
+| `npm run test:disease` | 35 pass, 0 fail (client parsing, 404 rejection, quota fallback, merge, Pl@ntNet-only build) |
+| `npm test` | all camera + disease + agro suites pass |
+| `npm run build` | success |
+| Neon `production` branch | `ALTER TABLE disease_scans ADD COLUMN identification jsonb` applied and verified via `information_schema` |
+
+**Still not verified:** a live Pl@ntNet round-trip — this sandbox has no
+`PLANTNET_API_KEY`. Add the key to `.env.local` and scan a real leaf to confirm
+the species card and EPPO disease candidates render.
+

@@ -1,0 +1,1 @@
+ALTER TABLE "disease_scans" ADD COLUMN "identification" jsonb;

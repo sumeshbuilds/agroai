@@ -51,14 +51,15 @@ Odisha/Kalinga page used for search. The signed-in app opens at `/dashboard`.
    so it can stay open on mobile data. Continuous preview is an opt-in toggle.
    An optional Groq vision model double-checks new tracks.
    **The old fake `simulate` intrusion panel has been removed.**
-8. **Plant doctor (photo disease detection)** — `/detect` lets the farmer take a
-   photo (rear camera on a phone) or upload one of any affected plant part. The
-   browser compresses it, Gemini Vision identifies the most likely disease,
-   pest damage or nutrient problem, and the app returns a confidence score,
+8. **Plant doctor (identify + disease detection)** — `/detect` lets the farmer
+   take a photo (rear camera on a phone) or upload one of any affected plant
+   part. The browser compresses it; **Pl@ntNet identifies the plant species**
+   (scientific + common names, family, match score) and its disease model lists
+   EPPO-coded candidates, while Gemini Vision writes the explainable diagnosis —
    visible symptoms, immediate actions, low-cost/organic options, a cautious
    chemical option and prevention advice. An optional Hugging Face PlantVillage
-   classifier runs in parallel as a consensus signal, and the result card shows
-   which models agreed.
+   classifier adds a consensus signal, and the result card shows which providers
+   agreed. With only a Pl@ntNet key the identification still works.
 9. **Soil Health Card & crop fit** — enter the values printed on an Indian Soil
    Health Card (pH, EC, organic carbon, N/P/K, texture). The app rates the soil,
    explains every limitation, and ranks 22 locally relevant crops against soil,
@@ -78,9 +79,10 @@ Odisha/Kalinga page used for search. The signed-in app opens at `/dashboard`.
 - **Database:** Neon Postgres + Drizzle ORM (`@neondatabase/serverless`)
 - **Maps:** Leaflet + react-leaflet with Esri World Imagery tiles
 - **Weather:** Open-Meteo (no API key)
-- **AI:** Google Gemini (`@google/generative-ai`) for weekly advisories and
-  plant-photo disease detection (optional Groq fallback + optional Hugging Face
-  PlantVillage classifier as a consensus signal)
+- **AI:** Google Gemini (`@google/generative-ai`) for weekly advisories and the
+  plant-doctor action plan, with **Pl@ntNet** for plant species + disease
+  identification (optional Groq fallback + optional Hugging Face PlantVillage
+  classifier as a consensus signal)
 - **Soil & climate:** Soil Health Card input + Open-Meteo ERA5 12-month normals
 - **Satellite:** optional Copernicus Data Space Sentinel-2 NDVI
 - **On-device vision:** TensorFlow.js (`tfjs-core`, `tfjs-converter`,
@@ -122,10 +124,15 @@ Android Chrome insecure-origin flag. Full steps:
 | `AUTH_COOKIE_SECURE` | No | Set `false` only for local `next start` tests over http. |
 | `NEXT_PUBLIC_SITE_URL` | Recommended | Canonical origin for canonical tags, sitemap and robots (default `https://www.agroai.co.in`). |
 | `GOOGLE_SITE_VERIFICATION` | No | Search Console verification token, emitted as a site-wide meta tag. |
-| `GEMINI_API_KEY` | Required for scans | Enables Gemini advisories and plant-photo disease detection; the weekly advisory still uses a rule-based fallback. |
+| `GEMINI_API_KEY` | Recommended | Enables the Gemini plant-doctor action plan and weekly advisory; the weekly advisory still uses a rule-based fallback. |
 | `GEMINI_MODEL` | No | Overrides the model (default `gemini-3.8-flash`). |
 | `DISEASE_GEMINI_TIMEOUT_MS` | No | Plant-scan Gemini timeout in ms (default `40000`, max `55000`). |
 | `GEMINI_BASE_URL` | No | Overrides the Gemini endpoint (proxy or local mock). |
+| `PLANTNET_API_KEY` | Required for identification | Pl@ntNet key for plant species + disease identification on scanned photos. |
+| `PLANTNET_PROJECT` | No | Restricts species identification to one flora (default `all`). |
+| `PLANTNET_LANG` | No | Language for common names (default `en`). |
+| `PLANTNET_TIMEOUT_MS` | No | Pl@ntNet request timeout in ms (default `20000`, max `55000`). |
+| `DISEASE_VISION_SOFT_DEADLINE_MS` | No | Max wait for the AI once Pl@ntNet has identified the plant (default `30000`). |
 | `GROQ_API_KEY` | No | Enables the Groq vision verifier for camera tracks, the plant-doctor fallback and the low-confidence second opinion. |
 | `GROQ_VISION_MODEL` | No | Overrides the verifier model (default `qwen/qwen3.8-27b`). |
 | `GROQ_DISEASE_MODEL` | No | Plant-scan fallback/second-opinion model (default `qwen/qwen3.8-27b`). |

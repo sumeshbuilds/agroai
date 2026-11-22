@@ -64,7 +64,7 @@ export async function POST(request: Request) {
 
     if (!isDiseaseAiConfigured()) {
       return fail(
-        "The plant doctor is not configured yet. Add GEMINI_API_KEY to .env.local and restart the server.",
+        "The plant doctor is not configured yet. Add PLANTNET_API_KEY (or GEMINI_API_KEY) to .env.local and restart the server.",
         503,
         { code: "DISEASE_AI_NOT_CONFIGURED" },
       );

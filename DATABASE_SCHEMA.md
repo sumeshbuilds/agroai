@@ -178,8 +178,9 @@ export const diseaseScans = pgTable('disease_scans', {
   lookAlikes: jsonb('look_alikes').notNull(),
   differentials: jsonb('differentials').notNull().default([]), // {name, confidence, note}[]
   monitoring: text('monitoring'), // when to re-inspect the plant
-  source: text('source').notNull().default('gemini'), // gemini | groq | gemini+groq
+  source: text('source').notNull().default('gemini'), // e.g. plantnet | plantnet+gemini | gemini+groq
   model: text('model'),
+  identification: jsonb('identification'), // Pl@ntNet species + EPPO disease candidates (nullable)
   createdAt: timestamp('created_at').defaultNow(),
 }, (table) => [
   index('disease_scans_farmer_idx').on(table.farmerId, table.createdAt),
@@ -213,6 +214,7 @@ camera session for the “Field context” panel.
 | `0004_first_wolfsbane.sql` | Adds `camera_alerts`; adds `confirmed` / `source` / `verified` to `camera_detections`. |
 | `0005_greedy_thor_girl.sql` | Creates `disease_scans` (photo + AI verdict + farmer index) with FKs to `farmers` and `crops`. |
 | `0006_disease_scan_context.sql` | Adds photo-quality/subject, retake advice, spread risk, urgency, differentials and monitoring to `disease_scans`. |
+| `0009_lovely_silver_centurion.sql` | Adds `identification` jsonb (Pl@ntNet species + disease candidates) to `disease_scans`. |
 
 Apply with `npm run db:push` (uses the direct `DATABASE_URL_UNPOOLED`
 connection). `drizzle-kit generate` produces SQL; never migrate over the pooled

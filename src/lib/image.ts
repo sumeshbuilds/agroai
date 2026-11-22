@@ -32,6 +32,20 @@ const MAX_EDGE = 1280;
 const TARGET_BYTES = 1_400_000;
 const QUALITIES = [0.86, 0.76, 0.64];
 const SAMPLE_EDGE = 240;
+/** Longest edge (px) below which a source photo is called low resolution. */
+const MIN_LONG_EDGE = 800;
+
+/**
+ * A small source photo cannot hold fine lesion detail once it is resized, so we
+ * warn the farmer to move closer. The test uses the longest edge only. Judging
+ * the shortest edge flagged ordinary 16:9 and panorama photos whose long edge
+ * was perfectly sharp — and any photo smaller than 600 px on either side — so
+ * almost every real phone or WhatsApp photo got a false "low resolution" tip.
+ */
+export function isLowResolution(width: number, height: number): boolean {
+  if (!(width > 0) || !(height > 0)) return false;
+  return Math.max(width, height) < MIN_LONG_EDGE;
+}
 
 function loadImage(src: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
@@ -186,7 +200,7 @@ export async function prepareScanImage(file: File): Promise<PreparedImage> {
 
     // A tiny source image stays blocky even after resizing, which hides fine
     // spots. Warn even when the exposure and focus checks look acceptable.
-    if (naturalWidth < 600 || naturalHeight < 600) {
+    if (isLowResolution(naturalWidth, naturalHeight)) {
       quality = {
         ...quality,
         label: quality.label === "poor" ? "poor" : "fair",
