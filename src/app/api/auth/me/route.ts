@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer, toFarmerDTO } from "@/lib/auth";
 import { handleRouteError, ok } from "@/lib/http";
 import { getFarmerSetup } from "@/lib/queries";
@@ -18,8 +18,9 @@ export async function GET() {
       return ok({ farmer: null });
     }
 
-    const db = getDb();
-    const setup = await getFarmerSetup(db, farmer.id);
+    const setup = await withFarmer(farmer.id, (db) =>
+      getFarmerSetup(db, farmer.id),
+    );
     return ok({ farmer: toFarmerDTO(farmer, setup) });
   } catch (error) {
     return handleRouteError(error);

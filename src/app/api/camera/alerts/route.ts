@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { parseCameraAlarmAcknowledgement, parseCameraAlarmQuery } from "@/lib/camera-alert-request";
 import {
@@ -25,7 +25,11 @@ export async function GET(request: Request) {
 
     const options = parseCameraAlarmQuery(new URL(request.url).searchParams);
     if (!options) return fail("Invalid alarm cursor or dismissal filter.", 400);
-    return ok(await listCameraAlerts(getDb(), farmer.id, options));
+    return ok(
+      await withFarmer(farmer.id, (db) =>
+        listCameraAlerts(db, farmer.id, options),
+      ),
+    );
   } catch (error) {
     return handleRouteError(error);
   }
@@ -52,17 +56,18 @@ export async function POST(request: Request) {
 
     const body = parseCameraAlarmAcknowledgement(input);
     if (!body) return fail("Send a valid alarm id, or all: true with a valid throughId snapshot.", 400);
-    const db = getDb();
 
-    if (body.all === true) {
-      const acknowledged = await acknowledgeAllCameraAlerts(db, farmer.id, body.throughId);
-      return ok({ acknowledged, all: true });
-    }
+    return withFarmer(farmer.id, async (db) => {
+      if (body.all === true) {
+        const acknowledged = await acknowledgeAllCameraAlerts(db, farmer.id, body.throughId);
+        return ok({ acknowledged, all: true });
+      }
 
-    const acknowledged = await acknowledgeCameraAlert(db, body.id, farmer.id);
-    if (!acknowledged) return fail("Alarm not found.", 404);
+      const acknowledged = await acknowledgeCameraAlert(db, body.id, farmer.id);
+      if (!acknowledged) return fail("Alarm not found.", 404);
 
-    return ok({ acknowledged: 1, all: false });
+      return ok({ acknowledged: 1, all: false });
+    });
   } catch (error) {
     return handleRouteError(error);
   }

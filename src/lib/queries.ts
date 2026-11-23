@@ -1,9 +1,10 @@
-import { and, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
 
 import {
   crops,
   farmlands,
   farmers,
+  setScope,
   weeklyReports,
   type Crop,
   type Farmland,
@@ -122,19 +123,26 @@ export async function listFarmlands(
 }
 
 /**
- * Farms that can be attached to a new account: either drawn during onboarding
- * (no owner yet), or created before accounts existed (owned by the legacy
- * "Demo Farmer", whose PIN hash is empty).
+ * Farms this browser drew during onboarding that are still unowned. The scope
+ * (RLS + the claim cookie) already limits rows; the extra id filter keeps the
+ * intent explicit and guarantees we never return a farm the caller did not
+ * create.
  */
-export async function listAvailableFarmlands(db: Database): Promise<FarmDTO[]> {
+export async function listAvailableFarmlands(
+  db: Database,
+  claimFarmIds: number[],
+): Promise<FarmDTO[]> {
+  if (claimFarmIds.length === 0) return [];
+
   const rows = await db
-    .select({ farm: farmlands })
+    .select()
     .from(farmlands)
-    .leftJoin(farmers, eq(farmlands.farmerId, farmers.id))
-    .where(or(isNull(farmlands.farmerId), eq(farmers.pinHash, "")))
+    .where(
+      and(isNull(farmlands.farmerId), inArray(farmlands.id, claimFarmIds)),
+    )
     .orderBy(desc(farmlands.createdAt));
 
-  return rows.map((row) => toFarmDTO(row.farm));
+  return rows.map(toFarmDTO);
 }
 
 export async function getFarmland(
@@ -157,7 +165,13 @@ export async function getFarmland(
 
 export async function createFarmland(
   db: Database,
-  input: { name: string; points: GeoPoint[]; farmerId?: number | null },
+  input: {
+    name: string;
+    points: GeoPoint[];
+    farmerId?: number | null;
+    /** Pre-allocated id, required when inserting an unowned onboarding draft. */
+    id?: number;
+  },
 ): Promise<FarmDTO> {
   const centroid = polygonCentroid(input.points);
   const areaAcres = polygonAreaAcres(input.points);
@@ -165,6 +179,7 @@ export async function createFarmland(
   const inserted = await db
     .insert(farmlands)
     .values({
+      ...(input.id ? { id: input.id } : {}),
       farmerId: input.farmerId ?? null,
       name: input.name,
       polygonGeoJson: input.points,
@@ -175,6 +190,62 @@ export async function createFarmland(
     .returning();
 
   return toFarmDTO(inserted[0]);
+}
+
+/** Allocates the next farmlands id so an unowned draft can be scoped before insert. */
+export async function nextFarmlandId(db: Database): Promise<number> {
+  const result = await db.execute(
+    sql`select nextval('farmlands_id_seq')::int as id`,
+  );
+  const row = result.rows[0] as { id: number } | undefined;
+  if (!row) throw new Error("Could not allocate a farm id.");
+  return row.id;
+}
+
+export async function renameFarmland(
+  db: Database,
+  farmId: number,
+  farmerId: number,
+  name: string,
+): Promise<FarmDTO | null> {
+  const rows = await db
+    .update(farmlands)
+    .set({ name })
+    .where(and(eq(farmlands.id, farmId), eq(farmlands.farmerId, farmerId)))
+    .returning();
+
+  return rows.length > 0 ? toFarmDTO(rows[0]) : null;
+}
+
+export async function deleteFarmlandDeep(
+  db: Database,
+  farmId: number,
+  farmerId: number,
+): Promise<boolean> {
+  const owned = await db
+    .select({ id: farmlands.id })
+    .from(farmlands)
+    .where(and(eq(farmlands.id, farmId), eq(farmlands.farmerId, farmerId)))
+    .limit(1);
+  if (owned.length === 0) return false;
+
+  const cropRows = await db
+    .select({ id: crops.id })
+    .from(crops)
+    .where(eq(crops.farmlandId, farmId));
+  const cropIds = cropRows.map((row) => row.id);
+
+  if (cropIds.length > 0) {
+    await db.delete(weeklyReports).where(inArray(weeklyReports.cropId, cropIds));
+    await db.delete(crops).where(inArray(crops.id, cropIds));
+  }
+
+  const removed = await db
+    .delete(farmlands)
+    .where(and(eq(farmlands.id, farmId), eq(farmlands.farmerId, farmerId)))
+    .returning({ id: farmlands.id });
+
+  return removed.length > 0;
 }
 
 export async function updateFarmSoil(
@@ -217,22 +288,22 @@ export async function updateFarmSoil(
 }
 
 /**
- * Claims an unowned (or legacy pre-auth) farm for a new farmer. Returns null
- * when the farm has already been claimed by a real account.
- */export async function claimFarmland(
+ * Claims an unowned (onboarding draft) farm for a newly created farmer. The
+ * caller must pass the farm ids this browser created; anything else is refused,
+ * so one visitor can never claim another visitor's field.
+ */
+export async function claimFarmland(
   db: Database,
   farmId: number,
   farmerId: number,
+  allowedFarmIds: number[],
 ): Promise<FarmDTO | null> {
+  if (!allowedFarmIds.includes(farmId)) return null;
+
   const rows = await db
     .update(farmlands)
     .set({ farmerId })
-    .where(
-      sql`${farmlands.id} = ${farmId} and (${farmlands.farmerId} is null or exists (
-        select 1 from ${farmers}
-        where ${farmers.id} = ${farmlands.farmerId} and ${farmers.pinHash} = ''
-      ))`,
-    )
+    .where(and(eq(farmlands.id, farmId), isNull(farmlands.farmerId)))
     .returning();
 
   return rows.length > 0 ? toFarmDTO(rows[0]) : null;
@@ -388,41 +459,83 @@ export async function getCropsByIds(db: Database, ids: number[]) {
 // ---------------------------------------------------------------------------
 // Farmers / auth helpers
 // ---------------------------------------------------------------------------
+//
+// Login and sign-up must read a farmer row before a scope exists, so those
+// lookups go through the SECURITY DEFINER functions defined in
+// sql/row-level-security.sql. Raw rows come back in snake_case.
+
+interface FarmerDbRow {
+  id: number;
+  name: string;
+  phone: string | null;
+  pin_hash: string;
+  language: string;
+  push_subscription: unknown;
+  created_at: Date | string | null;
+}
+
+function rowToFarmer(row: FarmerDbRow): Farmer {
+  return {
+    id: row.id,
+    name: row.name,
+    phone: row.phone,
+    pinHash: row.pin_hash,
+    language: row.language,
+    pushSubscription: row.push_subscription ?? null,
+    createdAt: row.created_at ? new Date(row.created_at) : null,
+  };
+}
 
 export async function findFarmerByName(
   db: Database,
   name: string,
 ): Promise<Farmer | null> {
-  const key = name.trim().toLowerCase();
-  const rows = await db
-    .select()
-    .from(farmers)
-    .where(sql`lower(${farmers.name}) = ${key}`)
-    .limit(1);
-
-  return rows[0] ?? null;
+  const result = await db.execute(sql`select * from auth_find_farmer(${name.trim()})`);
+  const row = result.rows[0] as unknown as FarmerDbRow | undefined;
+  return row ? rowToFarmer(row) : null;
 }
 
 export async function getFarmerById(
   db: Database,
   farmerId: number,
 ): Promise<Farmer | null> {
-  const rows = await db
-    .select()
-    .from(farmers)
-    .where(eq(farmers.id, farmerId))
-    .limit(1);
+  const result = await db.execute(
+    sql`select * from auth_find_farmer_by_id(${farmerId})`,
+  );
+  const row = result.rows[0] as unknown as FarmerDbRow | undefined;
+  return row ? rowToFarmer(row) : null;
+}
 
-  return rows[0] ?? null;
+/** True when the farm is still unowned or held by the legacy demo account. */
+export async function isFarmClaimable(
+  db: Database,
+  farmId: number,
+): Promise<boolean> {
+  const result = await db.execute(
+    sql`select auth_farm_claimable(${farmId}) as claimable`,
+  );
+  const row = result.rows[0] as { claimable: boolean } | undefined;
+  return row?.claimable === true;
 }
 
 export async function createFarmer(
   db: Database,
   input: { name: string; pinHash: string },
 ): Promise<Farmer> {
+  // Allocate the id first so the RLS insert policy can verify ownership and the
+  // RETURNING clause is allowed to read the new row back.
+  const allocated = await db.execute(
+    sql`select nextval('farmers_id_seq')::int as id`,
+  );
+  const id = (allocated.rows[0] as { id: number } | undefined)?.id;
+  if (!id) throw new Error("Could not allocate a farmer id.");
+
+  await setScope(db, { farmerId: id });
+
   const inserted = await db
     .insert(farmers)
     .values({
+      id,
       name: input.name,
       pinHash: input.pinHash,
       language: "en",

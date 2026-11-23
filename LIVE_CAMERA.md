@@ -8,6 +8,13 @@ security feed with real animal/human tracks.
 The old `simulate` intrusion page and its fake alerts have been removed. Every
 box and event on `/watch` now comes from a camera frame.
 
+> **Event-driven security mode:** the camera now captures an intrusion photo only
+> for confirmed animals (55%+ confidence, 15-second cooldown), sends a
+> 30-second battery heartbeat, keeps up to 20 captures in an offline queue, and
+> supports an on-demand 60-second Live Peek. See
+> [`SECURITY_CAMERA.md`](SECURITY_CAMERA.md) for the full rules, API and the
+> Supabase deployment bundle.
+
 ---
 
 ## 1. The two pages

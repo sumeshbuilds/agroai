@@ -86,10 +86,23 @@ export const cameraSessions = pgTable(
       .references(() => farmers.id, { onDelete: "cascade" }),
     token: text("token").notNull().unique(),
     name: text("name").notNull(),
-    /** waiting → live → ended */
+    /**
+     * waiting → armed/offline/live_peek → ended.
+     * `live` is kept for older rows and clients; it is treated as `armed`.
+     */
     status: text("status").notNull().default("waiting"),
     aiEnabled: boolean("ai_enabled").notNull().default(false),
     deviceLabel: text("device_label"),
+    /** Battery Status API reading from the phone heartbeat (0–100). */
+    batteryLevel: integer("battery_level"),
+    /** Last 30-second phone heartbeat. Drives the Armed/Offline badge. */
+    lastHeartbeat: timestamp("last_heartbeat"),
+    /** QR links are revocable by ending the session; this also expires stale links. */
+    pairingExpiresAt: timestamp("pairing_expires_at"),
+    /** Latest confirmed animal alert; used for UI cooldown diagnostics. */
+    lastEventAt: timestamp("last_event_at"),
+    /** When an on-demand WebRTC Live Peek auto-disconnects. */
+    livePeekUntil: timestamp("live_peek_until"),
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
     /** Latest JPEG as a `data:image/jpeg;base64,…` string. */
@@ -172,6 +185,12 @@ export const cameraAlerts = pgTable(
     verified: boolean("verified").notNull().default(false),
     lat: doublePrecision("lat"),
     lng: doublePrecision("lng"),
+    /** Private evidence snapshot; served only to the owner. */
+    imageData: text("image_data"),
+    /** Stable owner-scoped URL for the snapshot (null for legacy rows). */
+    imageUrl: text("image_url"),
+    /** Original phone capture time (may differ from the alarm insert time). */
+    capturedAt: timestamp("captured_at"),
     acknowledgedAt: timestamp("acknowledged_at"),
     createdAt: timestamp("created_at").defaultNow(),
   },
@@ -181,7 +200,37 @@ export const cameraAlerts = pgTable(
   ],
 );
 
-// 7. Weekly AI Crop Reports
+// 7. On-demand Live Peek signalling
+// One row per 60-second WebRTC request. The dashboard writes an SDP offer and
+// polls for the answer; the phone polls for a pending offer and writes its
+// answer. No video is stored and nothing streams unless the owner asks.
+export const cameraPeekSessions = pgTable(
+  "camera_peek_sessions",
+  {
+    id: serial("id").primaryKey(),
+    sessionId: integer("session_id")
+      .notNull()
+      .references(() => cameraSessions.id, { onDelete: "cascade" }),
+    farmerId: integer("farmer_id")
+      .notNull()
+      .references(() => farmers.id, { onDelete: "cascade" }),
+    /** Viewer SDP offer. */
+    offer: text("offer").notNull(),
+    /** Camera SDP answer, written by the phone. */
+    answer: text("answer"),
+    /** requested → answered → ended */
+    status: text("status").notNull().default("requested"),
+    expiresAt: timestamp("expires_at").notNull(),
+    createdAt: timestamp("created_at").defaultNow(),
+    updatedAt: timestamp("updated_at").defaultNow(),
+  },
+  (table) => [
+    index("camera_peek_session_idx").on(table.sessionId, table.expiresAt),
+    index("camera_peek_farmer_idx").on(table.farmerId),
+  ],
+);
+
+// 8. Weekly AI Crop Reports
 export const weeklyReports = pgTable("weekly_reports", {
   id: serial("id").primaryKey(),
   cropId: integer("crop_id").references(() => crops.id),
@@ -255,5 +304,6 @@ export type Crop = typeof crops.$inferSelect;
 export type CameraSession = typeof cameraSessions.$inferSelect;
 export type CameraDetection = typeof cameraDetections.$inferSelect;
 export type CameraAlert = typeof cameraAlerts.$inferSelect;
+export type CameraPeekSession = typeof cameraPeekSessions.$inferSelect;
 export type WeeklyReport = typeof weeklyReports.$inferSelect;
 export type DiseaseScan = typeof diseaseScans.$inferSelect;

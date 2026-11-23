@@ -53,7 +53,8 @@ const alertsFor = (options: Parameters<typeof listCameraAlerts>[2] = {}) => list
 
 before(async () => {
   for (const file of ["0000_watery_joshua_kane.sql", "0001_happy_nextwave.sql", "0002_live_camera_tables.sql",
-    "0003_remove_simulated_alerts.sql", "0004_first_wolfsbane.sql", "0005_greedy_thor_girl.sql"]) {
+    "0003_remove_simulated_alerts.sql", "0004_first_wolfsbane.sql", "0005_greedy_thor_girl.sql",
+    "0010_silent_wrecking_crew.sql"]) {
     await client.exec(readFileSync(join(process.cwd(), "drizzle", file), "utf8"));
   }
   const inserted = await database.insert(farmers).values([{ name: "Test farmer" }, { name: "Other farmer" }]).returning();

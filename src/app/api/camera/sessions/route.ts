@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { createCameraSession, listCameraSessions } from "@/lib/camera-queries";
 import { BadRequestError, fail, handleRouteError, ok, readJson } from "@/lib/http";
@@ -18,7 +18,9 @@ export async function GET() {
       return fail("Sign in to view your cameras.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    const sessions = await listCameraSessions(getDb(), farmer.id);
+    const sessions = await withFarmer(farmer.id, (db) =>
+      listCameraSessions(db, farmer.id),
+    );
     return ok({ sessions });
   } catch (error) {
     return handleRouteError(error);
@@ -50,7 +52,9 @@ export async function POST(request: Request) {
       throw new BadRequestError("Give the camera a name of at least 2 characters.");
     }
 
-    const session = await createCameraSession(getDb(), farmer.id, name);
+    const session = await withFarmer(farmer.id, (db) =>
+      createCameraSession(db, farmer.id, name),
+    );
     return ok({ session }, { status: 201 });
   } catch (error) {
     return handleRouteError(error);

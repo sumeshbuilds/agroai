@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import { getFarmland } from "@/lib/queries";
@@ -32,7 +32,9 @@ export async function GET(request: NextRequest) {
       return fail("A valid farmId is required.", 400);
     }
 
-    const farm = await getFarmland(getDb(), farmId, farmer.id);
+    const farm = await withFarmer(farmer.id, (db) =>
+      getFarmland(db, farmId, farmer.id),
+    );
     if (!farm) return fail("Farm not found on your account.", 404);
 
     if (!isSatelliteConfigured()) {

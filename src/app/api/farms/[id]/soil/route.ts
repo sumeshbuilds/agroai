@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok, readJson } from "@/lib/http";
 import { getFarmland, updateFarmSoil } from "@/lib/queries";
@@ -32,7 +32,9 @@ export async function GET(_request: Request, context: RouteContext) {
     const farmId = await resolveId(context);
     if (farmId === null) return fail("Invalid farm id.", 400);
 
-    const farm = await getFarmland(getDb(), farmId, farmer.id);
+    const farm = await withFarmer(farmer.id, (db) =>
+      getFarmland(db, farmId, farmer.id),
+    );
     if (!farm) return fail("Farm not found on your account.", 404);
 
     return ok({ soil: analyseSoil(farm.soil), raw: farm.soil ?? null });
@@ -55,10 +57,6 @@ export async function POST(request: Request, context: RouteContext) {
 
     const farmId = await resolveId(context);
     if (farmId === null) return fail("Invalid farm id.", 400);
-
-    const db = getDb();
-    const farm = await getFarmland(db, farmId, farmer.id);
-    if (!farm) return fail("Farm not found on your account.", 404);
 
     const body = await readJson<unknown>(request);
     const soil = normalizeSoilInput(body);
@@ -87,25 +85,30 @@ export async function POST(request: Request, context: RouteContext) {
     const validTestedAt =
       testedAt && !Number.isNaN(testedAt.getTime()) ? testedAt : null;
 
-    const updated = await updateFarmSoil(db, farmId, farmer.id, {
-      ph: soil.ph ?? null,
-      ec: soil.ec ?? null,
-      organicCarbon: soil.organicCarbon ?? null,
-      nitrogen: soil.nitrogen ?? null,
-      phosphorus: soil.phosphorus ?? null,
-      potassium: soil.potassium ?? null,
-      sandPct: soil.sandPct ?? null,
-      clayPct: soil.clayPct ?? null,
-      siltPct: soil.siltPct ?? null,
-      texture: soil.texture ?? null,
-      testedAt: validTestedAt,
-    });
+    return withFarmer(farmer.id, async (db) => {
+      const farm = await getFarmland(db, farmId, farmer.id);
+      if (!farm) return fail("Farm not found on your account.", 404);
 
-    if (!updated) return fail("Could not save the soil values.", 500);
+      const updated = await updateFarmSoil(db, farmId, farmer.id, {
+        ph: soil.ph ?? null,
+        ec: soil.ec ?? null,
+        organicCarbon: soil.organicCarbon ?? null,
+        nitrogen: soil.nitrogen ?? null,
+        phosphorus: soil.phosphorus ?? null,
+        potassium: soil.potassium ?? null,
+        sandPct: soil.sandPct ?? null,
+        clayPct: soil.clayPct ?? null,
+        siltPct: soil.siltPct ?? null,
+        texture: soil.texture ?? null,
+        testedAt: validTestedAt,
+      });
 
-    return ok({
-      farm: updated,
-      soil: analyseSoil(updated.soil),
+      if (!updated) return fail("Could not save the soil values.", 500);
+
+      return ok({
+        farm: updated,
+        soil: analyseSoil(updated.soil),
+      });
     });
   } catch (error) {
     return handleRouteError(error);

@@ -191,6 +191,7 @@ the environment variables that control the canonical origin.
 | Method | Route | Description |
 | --- | --- | --- |
 | `GET` / `POST` | `/api/farms` | List or create farmlands. |
+| `PATCH` / `DELETE` | `/api/farms/:id` | Rename or delete one of your fields (and its crops/reports). |
 | `GET` | `/api/weather` | Weather by `lat`/`lng`, or by `farmId`. |
 | `GET` / `POST` | `/api/crops` | List or create crops. |
 | `GET` / `POST` | `/api/camera/sessions` | List camera sessions / create a pairing token. |
@@ -206,6 +207,34 @@ the environment variables that control the canonical origin.
 | `GET` | `/api/reports` | List weekly reports. |
 | `POST` | `/api/translate` | Batch-translate short runtime sentences to Odia (`{texts: string[]}`). Returns `{translations: {[english]: odia}}`; empty when the AI provider is unavailable. |
 | `GET` / `POST` | `/api/cron/weekly-report` | Generate weekly advisories. |
+
+## Row level security
+
+Each farmer can only ever read or write their own rows. Two layers enforce it:
+
+1. **Postgres RLS.** Every tenant table (`farmers`, `farmlands`, `crops`,
+   `weekly_reports`, `disease_scans`, `camera_sessions`, `camera_detections`,
+   `camera_alerts`) has row level security enabled, with policies driven by the
+   transaction-local settings `app.farmer_id`, `app.claim_ids` and `app.service`.
+   The app opens one transaction per request and sets the scope via
+   `withFarmer` / `withClaim` / `withService` in `src/db/index.ts`. With no
+   scope, policies deny everything.
+2. **Anonymous onboarding binding.** A field drawn before an account exists is
+   stored unowned, but the browser that drew it gets a signed `agroai_claim`
+   cookie. Only that cookie can list or claim the draft — so one visitor can
+   never claim another visitor's unowned field.
+
+RLS is only enforced when the app does **not** connect as the table owner. Create
+the restricted role and point `DATABASE_URL` at it:
+
+```bash
+node scripts/apply-rls.mjs        # enable policies (run as the owner)
+node scripts/create-app-role.mjs  # create agroai_app (no BYPASSRLS) + grants
+node scripts/use-app-role.mjs     # rotate its password and update .env.local
+```
+
+Keep `DATABASE_URL_UNPOOLED` on the owner role so `drizzle-kit` migrations can
+still run. The owner bypasses RLS, so migrations and admin SQL keep working.
 
 ## Notes
 

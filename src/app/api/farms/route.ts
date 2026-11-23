@@ -1,10 +1,11 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { setScope, withClaim, withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
+import { addClaimFarmId, readClaimFarmIds } from "@/lib/claim";
 import { isValidPoint } from "@/lib/geo";
 import { fail, handleRouteError, ok, readJson } from "@/lib/http";
-import { createFarmland, listFarmlands } from "@/lib/queries";
+import { createFarmland, listFarmlands, nextFarmlandId } from "@/lib/queries";
 import type { GeoPoint } from "@/lib/types";
 
 /**
@@ -20,9 +21,9 @@ export async function GET() {
       return fail("Sign in to view your farms.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    const db = getDb();
-    const farms = await listFarmlands(db, farmer.id);
-    return ok({ farms });
+    return withFarmer(farmer.id, async (db) =>
+      ok({ farms: await listFarmlands(db, farmer.id) }),
+    );
   } catch (error) {
     return handleRouteError(error);
   }
@@ -37,7 +38,8 @@ interface CreateFarmBody {
  * POST /api/farms
  * Saves a farm polygon and computes its centroid + area server-side.
  * Signed-in farmers own the farm immediately. During onboarding (before the
- * account exists) the farm is stored unowned so it can be claimed in step 4.
+ * account exists) the farm is stored unowned but bound to this browser with a
+ * signed claim cookie, so only the visitor who drew it can see or claim it.
  */
 export async function POST(request: Request) {
   try {
@@ -62,13 +64,24 @@ export async function POST(request: Request) {
       );
     }
 
+    const name = (body.name ?? "").trim() || "My Farm";
     const farmer = await getSessionFarmer();
-    const db = getDb();
-    const farm = await createFarmland(db, {
-      name: (body.name ?? "").trim() || "My Farm",
-      points,
-      farmerId: farmer?.id ?? null,
+
+    if (farmer) {
+      const farm = await withFarmer(farmer.id, (db) =>
+        createFarmland(db, { name, points, farmerId: farmer.id }),
+      );
+      return ok({ farm }, { status: 201 });
+    }
+
+    // Anonymous onboarding draft, scoped to this browser's claim cookie.
+    const claimIds = await readClaimFarmIds();
+    const farm = await withClaim(claimIds, async (db) => {
+      const id = await nextFarmlandId(db);
+      await setScope(db, { claimFarmIds: [...claimIds, id] });
+      return createFarmland(db, { id, name, points, farmerId: null });
     });
+    await addClaimFarmId(farm.id);
 
     return ok({ farm }, { status: 201 });
   } catch (error) {

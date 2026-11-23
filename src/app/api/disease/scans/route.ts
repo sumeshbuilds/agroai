@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { listDiseaseScans } from "@/lib/disease-queries";
 import { fail, handleRouteError, ok } from "@/lib/http";
@@ -19,11 +19,13 @@ export async function GET(request: Request) {
     const limitRaw = Number(params.get("limit"));
     const beforeRaw = Number(params.get("before"));
 
-    const scans = await listDiseaseScans(getDb(), farmer.id, {
-      limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
-      beforeId:
-        Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined,
-    });
+    const scans = await withFarmer(farmer.id, (db) =>
+      listDiseaseScans(db, farmer.id, {
+        limit: Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined,
+        beforeId:
+          Number.isFinite(beforeRaw) && beforeRaw > 0 ? beforeRaw : undefined,
+      }),
+    );
 
     return ok({ scans });
   } catch (error) {

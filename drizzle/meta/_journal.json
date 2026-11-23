@@ -71,6 +71,13 @@
       "when": 1795243688192,
       "tag": "0009_lovely_silver_centurion",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1795430710320,
+      "tag": "0010_silent_wrecking_crew",
+      "breakpoints": true
     }
   ]
 }

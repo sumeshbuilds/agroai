@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { getDiseaseScanImage } from "@/lib/disease-queries";
 import { fail, handleRouteError } from "@/lib/http";
@@ -27,7 +27,9 @@ export async function GET(
       return fail("That scan id is not valid.", 400);
     }
 
-    const image = await getDiseaseScanImage(getDb(), scanId, farmer.id);
+    const image = await withFarmer(farmer.id, (db) =>
+      getDiseaseScanImage(db, scanId, farmer.id),
+    );
     if (!image) {
       return fail("That scan was not found.", 404, { code: "SCAN_NOT_FOUND" });
     }

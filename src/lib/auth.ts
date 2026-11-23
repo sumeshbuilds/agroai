@@ -4,7 +4,7 @@ import { promisify } from "node:util";
 import { cookies } from "next/headers";
 import { eq } from "drizzle-orm";
 
-import { farmers, getDb, type Farmer } from "@/db";
+import { farmers, withFarmer, type Farmer } from "@/db";
 import type { FarmerDTO } from "./types";
 
 const scrypt = promisify(scryptCallback) as (
@@ -76,6 +76,23 @@ function signPayload(payload: string): string {
   return createHmac("sha256", sessionSecret()).update(payload).digest("base64url");
 }
 
+/**
+ * Signs an arbitrary short payload (used for the session cookie and for the
+ * anonymous onboarding "farm claim" cookie). Not a JWT — the caller owns the
+ * payload format and any expiry check.
+ */
+export function signValue(payload: string): string {
+  return signPayload(payload);
+}
+
+/** Constant-time check of a signed value; returns true when the signature matches. */
+export function verifySignedValue(payload: string, signature: string): boolean {
+  const expected = Buffer.from(signPayload(payload));
+  const received = Buffer.from(signature);
+  if (expected.length !== received.length) return false;
+  return timingSafeEqual(expected, received);
+}
+
 function createToken(farmerId: number): string {
   const expiresAt = Math.floor(Date.now() / 1000) + SESSION_MAX_AGE_SECONDS;
   const payload = `${farmerId}.${expiresAt}`;
@@ -139,14 +156,17 @@ export async function getSessionFarmer(): Promise<Farmer | null> {
   const farmerId = await getSessionFarmerId();
   if (farmerId === null) return null;
 
-  const db = getDb();
-  const rows = await db
-    .select()
-    .from(farmers)
-    .where(eq(farmers.id, farmerId))
-    .limit(1);
+  // The row is read under the farmer's own RLS scope, so even a bug in this
+  // query cannot return another farmer's profile.
+  return withFarmer(farmerId, async (db) => {
+    const rows = await db
+      .select()
+      .from(farmers)
+      .where(eq(farmers.id, farmerId))
+      .limit(1);
 
-  return rows[0] ?? null;
+    return rows[0] ?? null;
+  });
 }
 
 export function toFarmerDTO(

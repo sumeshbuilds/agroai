@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb, withClaim } from "@/db";
 import {
   getSessionFarmer,
   hashPin,
@@ -8,17 +8,15 @@ import {
   setSessionCookie,
   toFarmerDTO,
 } from "@/lib/auth";
+import { clearClaimFarmIds, readClaimFarmIds } from "@/lib/claim";
 import { defaultDurationDays, stageNameForDay, sowingDateFromAge } from "@/lib/crop-guide";
 import { fail, handleRouteError, ok, readJson } from "@/lib/http";
 import {
   claimFarmland,
   createCrop,
   createFarmer,
-  deleteFarmerById,
   findFarmerByName,
-  getFarmerById,
-  getFarmland,
-  releaseFarmland,
+  isFarmClaimable,
 } from "@/lib/queries";
 
 interface RegisterBody {
@@ -36,6 +34,10 @@ const MAX_DURATION_DAYS = 400;
 /**
  * POST /api/auth/register
  * Completes the 4-step onboarding: farmer profile, farm, crop and PIN.
+ *
+ * The farm must be one this browser drew during onboarding (recorded in the
+ * signed claim cookie). That binding — enforced here and by row level security
+ * — is what stops one visitor from claiming another visitor's unowned field.
  */
 export async function POST(request: Request) {
   try {
@@ -93,61 +95,66 @@ export async function POST(request: Request) {
       );
     }
 
-    const farm = await getFarmland(db, farmId);
-    if (!farm) {
-      return fail("That farm no longer exists. Draw or select another farm.", 404);
+    const claimFarmIds = await readClaimFarmIds();
+    if (!claimFarmIds.includes(farmId)) {
+      return fail(
+        "That farm is no longer available. Please draw or select another farm.",
+        409,
+        { code: "FARM_TAKEN" },
+      );
     }
-    if (farm.farmerId !== null) {
-      const owner = await getFarmerById(db, farm.farmerId);
-      if (owner?.pinHash) {
-        return fail("That farm already belongs to another account. Select another farm.", 409, {
-          code: "FARM_TAKEN",
-        });
-      }
+
+    const claimable = await isFarmClaimable(db, farmId);
+    if (!claimable) {
+      return fail("That farm already belongs to another account. Select another farm.", 409, {
+        code: "FARM_TAKEN",
+      });
     }
 
     const ageDays = Math.round(cropDays);
     const pinHash = await hashPin(pin);
-    const farmer = await createFarmer(db, { name, pinHash });
 
-    let claimed = false;
-    try {
-      const farmClaim = await claimFarmland(db, farm.id, farmer.id);
+    // One transaction: create the farmer, claim the field and plant the crop.
+    // If any step fails, everything rolls back and the unowned draft stays
+    // available for the same browser to retry.
+    const created = await withClaim(claimFarmIds, async (scoped) => {
+      const farmer = await createFarmer(scoped, { name, pinHash });
+
+      const farmClaim = await claimFarmland(scoped, farmId, farmer.id, claimFarmIds);
       if (!farmClaim) {
-        await deleteFarmerById(db, farmer.id);
-        return fail(
-          "That farm was just claimed by someone else. Please select another farm.",
-          409,
-          { code: "FARM_TAKEN" },
-        );
+        return { error: "FARM_TAKEN" } as const;
       }
-      claimed = true;
 
-      const crop = await createCrop(db, {
+      const crop = await createCrop(scoped, {
         cropName,
         sowingDate: sowingDateFromAge(ageDays),
-        farmlandId: farm.id,
+        farmlandId: farmId,
         durationDays,
         growthStage: stageNameForDay(cropName, ageDays, durationDays),
       });
 
-      await setSessionCookie(farmer.id);
+      return { farmer, farm: farmClaim, crop } as const;
+    });
 
-      return ok(
-        {
-          farmer: toFarmerDTO(farmer, { hasFarm: true, hasCrop: true }),
-          farm: farmClaim,
-          crop,
-        },
-        { status: 201 },
+    if ("error" in created) {
+      return fail(
+        "That farm was just claimed. Please select another farm.",
+        409,
+        { code: "FARM_TAKEN" },
       );
-    } catch (cause) {
-      if (claimed) {
-        await releaseFarmland(db, farm.id, farmer.id).catch(() => undefined);
-      }
-      await deleteFarmerById(db, farmer.id).catch(() => undefined);
-      throw cause;
     }
+
+    await setSessionCookie(created.farmer.id);
+    await clearClaimFarmIds();
+
+    return ok(
+      {
+        farmer: toFarmerDTO(created.farmer, { hasFarm: true, hasCrop: true }),
+        farm: created.farm,
+        crop: created.crop,
+      },
+      { status: 201 },
+    );
   } catch (error) {
     return handleRouteError(error);
   }

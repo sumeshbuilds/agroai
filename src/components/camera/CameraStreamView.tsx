@@ -12,6 +12,7 @@ import type { ObjectDetection } from "@tensorflow-models/coco-ssd";
 import Link from "next/link";
 import {
   Activity,
+  BatteryMedium,
   BellRing,
   Camera,
   CameraOff,
@@ -21,11 +22,13 @@ import {
   Flashlight,
   Gauge,
   MapPin,
+  Moon,
   Radio,
   ScanEye,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
+  Video,
   Wifi,
   WifiOff,
   Zap,
@@ -45,7 +48,7 @@ import {
 } from "@/lib/camera";
 import {
   encodeCameraFrame, MAX_PENDING_CAMERA_FRAMES, sampleCameraLuminance,
-  type CameraFrameSnapshot, type LuminanceSample,
+  type CameraFrameSnapshot, type LuminanceSample, type PendingCameraFrame,
 } from "@/lib/camera-capture";
 import { CameraEventBuffer } from "@/lib/camera-event-buffer";
 import {
@@ -55,6 +58,21 @@ import {
 } from "@/lib/camera-link";
 import { estimateCameraMotion, STILL_CAMERA } from "@/lib/camera-motion";
 import { cameraCandidates, CameraTracker, distantScanRegions, suppressDuplicateDetections } from "@/lib/camera-tracker";
+import {
+  blobToDataUrl,
+  canRaiseIntrusion,
+  hasCaptureAnimal,
+  LIVE_PEEK_DURATION_MS,
+  LIVE_PEEK_ICE_SERVERS,
+  SECURITY_HEARTBEAT_MS,
+  SECURITY_INFERENCE_MS,
+  SECURITY_OFFLINE_RETRY_MS,
+  type CameraDeviceStatus,
+} from "@/lib/security-camera";
+import {
+  queuedCaptureToUpload,
+  securityOfflineQueue,
+} from "@/lib/camera-offline-queue";
 import { useClientValue } from "@/lib/hooks/use-client-value";
 import { useI18n } from "@/lib/i18n";
 
@@ -93,10 +111,17 @@ interface ConnectionLike {
   removeEventListener?: (type: string, listener: () => void) => void;
 }
 
+interface BatteryManagerLike {
+  level: number;
+  charging?: boolean;
+  addEventListener?: (type: string, listener: () => void) => void;
+  removeEventListener?: (type: string, listener: () => void) => void;
+}
+
 const DETECT_MAX_WIDTH = 720;
-/** Detection cadence (ms): moving object, idle scene, hidden tab. */
-const DETECT_INTERVAL_ACTIVE = 350;
-const DETECT_INTERVAL_IDLE = 950;
+/** 1 FPS inference is plenty for field security and keeps the phone cool. */
+const DETECT_INTERVAL_ACTIVE = SECURITY_INFERENCE_MS;
+const DETECT_INTERVAL_IDLE = SECURITY_INFERENCE_MS;
 const DETECT_INTERVAL_HIDDEN = 2_500;
 /** Upload cadence (ms). */
 const UPLOAD_INTERVAL_ACTIVE = 700;
@@ -105,16 +130,18 @@ const UPLOAD_INTERVAL_SLOW = 5_000;
 const IDLE_UPLOAD_INTERVAL_SLOW = 6_500;
 /**
  * Event-only mode: the phone keeps detecting locally and only sends a photo
- * when a confirmed person/animal event is queued, plus a slow heartbeat so the
+ * when a confirmed animal event is queued, plus a slow heartbeat so the
  * dashboard can still show that the camera is alive. The upload loop ticks
  * cheaply every ~1.2 s and sends nothing unless the gate opens.
  */
 const EVENT_UPLOAD_INTERVAL_ACTIVE = 700;
 const EVENT_UPLOAD_INTERVAL_SLOW = 1_400;
 const EVENT_LOOP_INTERVAL = 1_200;
-const EVENT_HEARTBEAT_MS = 35_000;
+const EVENT_HEARTBEAT_MS = SECURITY_HEARTBEAT_MS;
 const EVENT_HEARTBEAT_SLOW_MS = 60_000;
 const UPLOAD_MODE_KEY = "agroai.camera.uploadMode";
+const BATTERY_SAVER_KEY = "agroai.camera.batterySaver";
+const LAST_ALERT_KEY_PREFIX = "agroai.camera.lastAlert";
 
 function deviceLabel(): string {
   if (typeof navigator === "undefined") return "Camera";
@@ -197,6 +224,16 @@ export function CameraStreamView() {
   const phoneSeenRef = useRef(new Set<number>());
   const receiptScrollRef = useRef<HTMLDivElement | null>(null);
   const controlBusyRef = useRef(false);
+  const batteryRef = useRef<number | null>(null);
+  const batterySaverRef = useRef(false);
+  const lastAlertAtRef = useRef(0);
+  const alertKeyRef = useRef("");
+  const peekPcRef = useRef<RTCPeerConnection | null>(null);
+  const peekIdRef = useRef<number | null>(null);
+  const peekTimerRef = useRef(0);
+  const peekActiveRef = useRef(false);
+  const queueDrainBusyRef = useRef(false);
+  const lastQueueDrainRef = useRef(0);
 
   const [pairing, setPairing] = useState<{
     session: CameraSessionDTO;
@@ -235,6 +272,10 @@ export function CameraStreamView() {
   const [distantScan, setDistantScan] = useState(false);
   const [cameraMoving, setCameraMoving] = useState(false);
   const [backlog, setBacklog] = useState(0);
+  const [queueCount, setQueueCount] = useState(0);
+  const [batteryLevel, setBatteryLevel] = useState<number | null>(null);
+  const [batterySaver, setBatterySaver] = useState(false);
+  const [peekActive, setPeekActive] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [network, setNetwork] = useState<NetworkProfile>(() => ({
     saveData: false,
@@ -254,6 +295,62 @@ export function CameraStreamView() {
     }, 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  // Battery Saver / Dim Screen preference survives a reload.
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      let enabled = false;
+      try { enabled = window.localStorage.getItem(BATTERY_SAVER_KEY) === "1"; } catch { /* storage blocked */ }
+      batterySaverRef.current = enabled;
+      setBatterySaver(enabled);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  // Battery Status API is optional; a missing battery simply shows "—".
+  useEffect(() => {
+    let cancelled = false;
+    let manager: BatteryManagerLike | null = null;
+    const update = () => {
+      if (cancelled || !manager) return;
+      const level = Math.round(manager.level * 100);
+      batteryRef.current = level;
+      setBatteryLevel(level);
+    };
+    const nav = navigator as Navigator & { getBattery?: () => Promise<BatteryManagerLike> };
+    nav.getBattery?.().then((battery) => {
+      if (cancelled) return;
+      manager = battery;
+      update();
+      battery.addEventListener?.("levelchange", update);
+    }).catch(() => undefined);
+    return () => {
+      cancelled = true;
+      manager?.removeEventListener?.("levelchange", update);
+    };
+  }, []);
+
+  // Remember the 15-second per-camera alert cooldown across reloads.
+  useEffect(() => {
+    const id = pairing?.session.id;
+    if (!id) return;
+    const key = `${LAST_ALERT_KEY_PREFIX}.${id}`;
+    alertKeyRef.current = key;
+    try {
+      const stored = Number(window.localStorage.getItem(key) ?? 0);
+      lastAlertAtRef.current = Number.isFinite(stored) ? stored : 0;
+    } catch {
+      lastAlertAtRef.current = 0;
+    }
+  }, [pairing?.session.id]);
+
+  useEffect(() => {
+    let active = true;
+    void securityOfflineQueue.count().then((count) => {
+      if (active) setQueueCount(count);
+    });
+    return () => { active = false; };
+  }, [token]);
 
   const changeUploadMode = (mode: "events" | "live") => {
     uploadModeRef.current = mode;
@@ -416,9 +513,38 @@ export function CameraStreamView() {
       navigator.geolocation?.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    // End any Live Peek and tell the dashboard this phone went offline.
+    if (peekTimerRef.current) {
+      window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = 0;
+    }
+    peekPcRef.current?.close();
+    peekPcRef.current = null;
+    peekIdRef.current = null;
+    peekActiveRef.current = false;
+    setPeekActive(false);
+    if (token && typeof navigator !== "undefined") {
+      try {
+        navigator.sendBeacon?.(
+          `/api/camera/stream/${encodeURIComponent(token)}/heartbeat`,
+          new Blob(
+            [
+              JSON.stringify({
+                status: "offline",
+                batteryLevel: batteryRef.current,
+                deviceLabel: deviceLabel(),
+              }),
+            ],
+            { type: "application/json" },
+          ),
+        );
+      } catch {
+        // The next heartbeat or dashboard timeout will mark it offline.
+      }
+    }
     void wakeLockRef.current?.release().catch(() => undefined);
     wakeLockRef.current = null;
-  }, [releaseStream]);
+  }, [releaseStream, token]);
 
   const acquireWakeLock = useCallback(async (generation: number) => {
     if (!runningRef.current || document.visibilityState !== "visible" || wakeLockRequestRef.current === generation || (wakeLockRef.current && !wakeLockRef.current.released)) return;
@@ -609,6 +735,168 @@ export function CameraStreamView() {
     [acquireWakeLock, hasMedia, isEnded, loadAi, releaseStream, secure, stopCamera, token],
   );
 
+  // ---- 60-second Live Peek (WebRTC answerer on the phone) ----------------
+  const closePeek = useCallback(() => {
+    if (peekTimerRef.current) {
+      window.clearTimeout(peekTimerRef.current);
+      peekTimerRef.current = 0;
+    }
+    peekPcRef.current?.close();
+    peekPcRef.current = null;
+    peekIdRef.current = null;
+    peekActiveRef.current = false;
+    setPeekActive(false);
+  }, []);
+
+  const answerPeek = useCallback(
+    async (offer: { id: number; offer: string }) => {
+      if (!token || !runningRef.current || peekPcRef.current) return;
+      const stream = streamRef.current;
+      if (!stream || typeof RTCPeerConnection === "undefined") return;
+      const pc = new RTCPeerConnection({ iceServers: LIVE_PEEK_ICE_SERVERS });
+      peekPcRef.current = pc;
+      try {
+        stream.getTracks().forEach((track) => pc.addTrack(track, stream));
+        await pc.setRemoteDescription({ type: "offer", sdp: offer.offer });
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        const sdp = pc.localDescription?.sdp;
+        if (!sdp) throw new Error("No WebRTC answer.");
+        await api.answerCameraPeek(token, offer.id, sdp);
+        if (!activeRef.current) {
+          pc.close();
+          return;
+        }
+        peekIdRef.current = offer.id;
+        peekActiveRef.current = true;
+        setPeekActive(true);
+        peekTimerRef.current = window.setTimeout(() => closePeek(), LIVE_PEEK_DURATION_MS);
+        pc.addEventListener("connectionstatechange", () => {
+          if (pc.connectionState === "failed" || pc.connectionState === "closed") {
+            closePeek();
+          }
+        });
+      } catch {
+        if (peekPcRef.current === pc) closePeek();
+      }
+    },
+    [closePeek, token],
+  );
+
+  // ---- 30-second heartbeat + pending Live Peek offer ---------------------
+  const sendHeartbeat = useCallback(
+    async (status?: CameraDeviceStatus) => {
+      if (!token || !activeRef.current) return;
+      try {
+        const result = await api.postCameraHeartbeat(token, {
+          status: status ?? (peekActiveRef.current ? "live_peek" : "armed"),
+          batteryLevel: batteryRef.current,
+          deviceLabel: deviceLabel(),
+          lat: geoRef.current?.lat ?? null,
+          lng: geoRef.current?.lng ?? null,
+        });
+        if (activeRef.current && result.peek) void answerPeek(result.peek);
+      } catch (cause) {
+        if (!activeRef.current) return;
+        if (
+          cause instanceof ApiError &&
+          (cause.code === "STREAM_STOPPED" || cause.status === 404)
+        ) {
+          stopCamera();
+          setStoppedByServer(true);
+          setUploadState("stopped");
+        }
+      }
+    },
+    [answerPeek, stopCamera, token],
+  );
+
+  // ---- offline capture queue --------------------------------------------
+  const persistPrepared = useCallback(async (frame: PendingCameraFrame) => {
+    try {
+      const dataUrl = await blobToDataUrl(frame.blob);
+      const count = await securityOfflineQueue.enqueue({
+        id: crypto.randomUUID(),
+        dataUrl,
+        capturedAt: frame.meta.capturedAt ?? new Date().toISOString(),
+        meta: frame.meta as Record<string, unknown>,
+      });
+      if (activeRef.current) setQueueCount(count);
+    } catch {
+      // The in-memory event buffer still holds this capture.
+    }
+  }, []);
+
+  const persistSnapshot = useCallback(
+    async (snapshot: CameraFrameSnapshot, slow: boolean) => {
+      try {
+        const frame = await encodeCameraFrame(snapshot, slow, deviceLabel());
+        await persistPrepared(frame);
+      } catch {
+        // Keep the in-memory event; a retry still has the pixels.
+      }
+    },
+    [persistPrepared],
+  );
+
+  const rememberAlert = useCallback(() => {
+    lastAlertAtRef.current = Date.now();
+    const key = alertKeyRef.current;
+    if (!key) return;
+    try {
+      window.localStorage.setItem(key, String(lastAlertAtRef.current));
+    } catch {
+      // Private mode: the in-memory cooldown still applies.
+    }
+  }, []);
+
+  const drainOfflineQueue = useCallback(async () => {
+    if (!token || queueDrainBusyRef.current || !navigator.onLine) return;
+    queueDrainBusyRef.current = true;
+    try {
+      const items = await securityOfflineQueue.list();
+      if (items.length === 0) {
+        if (activeRef.current) setQueueCount(0);
+        return;
+      }
+      for (const item of items) {
+        if (!activeRef.current) return;
+        const upload = queuedCaptureToUpload(item);
+        try {
+          await api.postCameraFrameMultipart(token, upload.meta, upload.blob);
+          await securityOfflineQueue.remove(item.id);
+          if (activeRef.current) setUploads((count) => count + 1);
+        } catch (cause) {
+          if (
+            cause instanceof ApiError &&
+            (cause.code === "STREAM_STOPPED" || cause.status === 404)
+          ) {
+            stopCamera();
+            setStoppedByServer(true);
+            setUploadState("stopped");
+            return;
+          }
+          break;
+        }
+      }
+      const count = await securityOfflineQueue.count();
+      if (activeRef.current) setQueueCount(count);
+    } finally {
+      queueDrainBusyRef.current = false;
+    }
+  }, [stopCamera, token]);
+
+  const toggleBatterySaver = () => {
+    const next = !batterySaverRef.current;
+    batterySaverRef.current = next;
+    setBatterySaver(next);
+    try {
+      window.localStorage.setItem(BATTERY_SAVER_KEY, next ? "1" : "0");
+    } catch {
+      // Preference is still applied for this session.
+    }
+  };
+
   // Stop the stream if the laptop ends the session.
   useEffect(() => {
     if (pairing?.session.status !== "ended" || (!started && !starting)) return;
@@ -635,6 +923,9 @@ export function CameraStreamView() {
       if (watchIdRef.current !== null) {
         navigator.geolocation?.clearWatch(watchIdRef.current);
       }
+      if (peekTimerRef.current) window.clearTimeout(peekTimerRef.current);
+      peekPcRef.current?.close();
+      peekPcRef.current = null;
       void wakeLockRef.current?.release().catch(() => undefined);
       if (!detectBusyRef.current) { modelRef.current?.dispose(); modelRef.current = null; }
     };
@@ -726,8 +1017,14 @@ export function CameraStreamView() {
           uploadMs: uploadMsRef.current,
           failures: uploadFailuresRef.current,
         });
-      if (eventBufferRef.current.enqueue(snapshot, degraded, deviceLabel())) {
+      const animalEvent =
+        hasCaptureAnimal(snapshot.detections) &&
+        canRaiseIntrusion(lastAlertAtRef.current, Date.now());
+      if (animalEvent && eventBufferRef.current.enqueue(snapshot, degraded, deviceLabel())) {
+        rememberAlert();
         setBacklog(eventBufferRef.current.size);
+        // No link: persist the JPEG now so a reload cannot lose the intrusion.
+        if (!profile.online) void persistSnapshot(snapshot, degraded);
       }
     } catch {
       if (!accept()) return;
@@ -746,7 +1043,7 @@ export function CameraStreamView() {
       detectBusyRef.current = false;
       if (!activeRef.current && modelRef.current === model) { model.dispose(); modelRef.current = null; }
     }
-  }, [captureSnapshot]);
+  }, [captureSnapshot, persistSnapshot, rememberAlert]);
 
   // Camera translation/exposure changes are diagnostics, not animal tracks.
   const sampleMotion = useCallback(() => {
@@ -781,6 +1078,13 @@ export function CameraStreamView() {
     const generation = generationRef.current;
     const accept = () => activeRef.current && runningRef.current && generation === generationRef.current;
 
+    // Retry captures saved while offline every 10 s (and immediately on online).
+    if (performance.now() - lastQueueDrainRef.current >= SECURITY_OFFLINE_RETRY_MS) {
+      lastQueueDrainRef.current = performance.now();
+      await drainOfflineQueue();
+      if (!accept()) return;
+    }
+
     if (uploadModeRef.current === "events") {
       const queued = eventBufferRef.current.size > 0;
       const heartbeat =
@@ -810,6 +1114,7 @@ export function CameraStreamView() {
     let phase: "encode" | "upload" = "encode";
     let succeeded = false;
     let uploadStartedAt = 0;
+    let prepared: PendingCameraFrame | null = null;
     try {
       const queued = eventBufferRef.current.size > 0;
       const snapshot = aiReadyRef.current ? snapshotRef.current : captureSnapshot();
@@ -823,6 +1128,7 @@ export function CameraStreamView() {
             heartbeat: uploadModeRef.current === "events",
           });
       if (!accept() || !frame) return;
+      prepared = frame;
       controller.signal.throwIfAborted();
       phase = "upload";
       uploadStartedAt = performance.now();
@@ -858,6 +1164,7 @@ export function CameraStreamView() {
       if (!navigator.onLine) {
         setUploadState("offline");
         setUploadError(null);
+        if (prepared) void persistPrepared(prepared);
       } else if (cause instanceof ApiError && (cause.code === "STREAM_STOPPED" || cause.status === 404)) {
         stopCamera();
         setStoppedByServer(true);
@@ -886,7 +1193,7 @@ export function CameraStreamView() {
       if (uploadControllerRef.current === controller) uploadControllerRef.current = null;
       uploadBusyRef.current = false;
     }
-  }, [captureSnapshot, stopCamera, token]);
+  }, [captureSnapshot, drainOfflineQueue, persistPrepared, stopCamera, token]);
 
   // ---- display sync ------------------------------------------------------
   const syncDisplay = useCallback(() => {
@@ -914,9 +1221,10 @@ export function CameraStreamView() {
       const start = performance.now();
       await runDetection();
       if (!alive()) return;
+      const saver = batterySaverRef.current ? 2 : 1;
       const base = document.visibilityState !== "visible" ? DETECT_INTERVAL_HIDDEN :
         performance.now() - lastMotionAtRef.current < 1_500 || trackerRef.current.size > 0 ? DETECT_INTERVAL_ACTIVE : DETECT_INTERVAL_IDLE;
-      const cadence = Math.max(base, inferenceMsRef.current * 1.4);
+      const cadence = Math.max(base * saver, inferenceMsRef.current * 1.4);
       detectTimer = window.setTimeout(() => void detect(), Math.max(100, cadence - (performance.now() - start)));
     };
     const motion = () => {
@@ -946,7 +1254,7 @@ export function CameraStreamView() {
             : UPLOAD_INTERVAL_IDLE;
       const cadence = profile.online
         ? uploadCadenceMs({
-            baseIntervalMs: base,
+            baseIntervalMs: base * (batterySaverRef.current ? 2 : 1),
             uploadMs: uploadMsRef.current,
             failures: uploadFailuresRef.current,
             slow: profile.slow,
@@ -975,6 +1283,8 @@ export function CameraStreamView() {
     const onOnline = () => {
       setNetwork(networkProfile());
       uploadFailuresRef.current = 0;
+      // Drain the IndexedDB queue immediately when the link returns.
+      lastQueueDrainRef.current = 0;
       if (!alive() || document.visibilityState !== "visible") return;
       if (!uploadBusyRef.current) { window.clearTimeout(uploadTimer); void upload(); }
     };
@@ -997,6 +1307,65 @@ export function CameraStreamView() {
       window.removeEventListener("offline", onOffline);
     };
   }, [started, acquireWakeLock, runDetection, sampleMotion, uploadFrame, syncDisplay]);
+
+  // ---- heartbeat + Live Peek polling ------------------------------------
+  useEffect(() => {
+    if (!started || !token) return;
+    let stopped = false;
+    let timer = 0;
+    const tick = async () => {
+      await sendHeartbeat();
+      if (!stopped) timer = window.setTimeout(() => void tick(), SECURITY_HEARTBEAT_MS);
+    };
+    timer = window.setTimeout(() => void tick(), 1_500);
+    const onPageHide = () => {
+      try {
+        navigator.sendBeacon?.(
+          `/api/camera/stream/${encodeURIComponent(token)}/heartbeat`,
+          new Blob(
+            [
+              JSON.stringify({
+                status: "offline",
+                batteryLevel: batteryRef.current,
+                deviceLabel: deviceLabel(),
+              }),
+            ],
+            { type: "application/json" },
+          ),
+        );
+      } catch {
+        // Dashboard falls back to the 90-second heartbeat timeout.
+      }
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+      window.removeEventListener("pagehide", onPageHide);
+    };
+  }, [sendHeartbeat, started, token]);
+
+  useEffect(() => {
+    if (!started || !token) return;
+    let stopped = false;
+    let timer = 0;
+    const poll = async () => {
+      if (!stopped && runningRef.current && !peekPcRef.current) {
+        try {
+          const result = await api.getCameraPeekOffer(token);
+          if (!stopped && result.peek) void answerPeek(result.peek);
+        } catch {
+          // The next tick retries; the heartbeat also carries offers.
+        }
+      }
+      if (!stopped) timer = window.setTimeout(() => void poll(), 5_000);
+    };
+    timer = window.setTimeout(() => void poll(), 1_200);
+    return () => {
+      stopped = true;
+      window.clearTimeout(timer);
+    };
+  }, [answerPeek, started, token]);
 
   // ---- overlay -----------------------------------------------------------
   useEffect(() => {
@@ -1196,18 +1565,22 @@ export function CameraStreamView() {
           <span
             className={
               started
-                ? "inline-flex items-center gap-1.5 rounded-full border border-red-400/40 bg-red-500/15 px-2.5 py-1 text-[11px] font-bold text-red-300"
+                ? peekActive
+                  ? "inline-flex items-center gap-1.5 rounded-full border border-sky-400/40 bg-sky-500/15 px-2.5 py-1 text-[11px] font-bold text-sky-300"
+                  : "inline-flex items-center gap-1.5 rounded-full border border-emerald-400/40 bg-emerald-500/15 px-2.5 py-1 text-[11px] font-bold text-emerald-300"
                 : "inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-bold text-slate-300"
             }
           >
             <span
               className={
                 started
-                  ? "h-1.5 w-1.5 animate-pulse-soft rounded-full bg-red-400"
+                  ? peekActive
+                    ? "h-1.5 w-1.5 animate-pulse-soft rounded-full bg-sky-400"
+                    : "h-1.5 w-1.5 rounded-full bg-emerald-400"
                   : "h-1.5 w-1.5 rounded-full bg-slate-500"
               }
             />
-            {started ? t("LIVE") : t("OFFLINE")}
+            {started ? (peekActive ? t("LIVE PEEK") : t("ARMED")) : t("OFFLINE")}
           </span>
         </div>
       </header>
@@ -1298,6 +1671,26 @@ export function CameraStreamView() {
           </div>
         ) : null}
 
+        {queueCount > 0 ? (
+          <div role="status" className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-3.5 text-sm leading-relaxed text-sky-100">
+            <p className="flex items-center gap-2 font-semibold">
+              <WifiOff aria-hidden className="h-4 w-4" />
+              {t("{count} captures saved on this phone", { count: queueCount })}
+            </p>
+            <p className="mt-1">{t("They upload automatically every 10 seconds and as soon as the connection returns.")}</p>
+          </div>
+        ) : null}
+
+        {peekActive ? (
+          <div role="status" className="rounded-xl border border-sky-400/30 bg-sky-400/10 p-3.5 text-sm leading-relaxed text-sky-100">
+            <p className="flex items-center gap-2 font-semibold">
+              <Video aria-hidden className="h-4 w-4" />
+              {t("Live Peek active")}
+            </p>
+            <p className="mt-1">{t("The dashboard is watching this camera for up to 60 seconds. Detection continues in the background.")}</p>
+          </div>
+        ) : null}
+
         <div
           className={
             started
@@ -1313,6 +1706,12 @@ export function CameraStreamView() {
             playsInline
             aria-label={t("Live preview from this phone camera")}
           />
+          {batterySaver ? (
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 bg-black/55"
+            />
+          ) : null}
           <canvas
             ref={overlayRef}
             className="pointer-events-none absolute inset-0 h-full w-full"
@@ -1379,7 +1778,7 @@ export function CameraStreamView() {
                 <h2 className="text-xl font-semibold">{t("Point at your field")}</h2>
                 <p className="mx-auto mt-3 max-w-xs text-sm leading-relaxed text-slate-300">
                   {t(
-                    "People and animals are tracked on this phone. In event-only mode it sends a photo only when something is confirmed, so it can stay open on mobile data. Keep this page open and the screen on.",
+                    "People and animals are tracked on this phone. In event-only mode it sends a photo only when an animal is confirmed, so it can stay open on mobile data. Keep this page open and the screen on.",
                   )}
                 </p>
               </div>
@@ -1472,6 +1871,12 @@ export function CameraStreamView() {
                 label={t("GPS")}
                 value={gps ? `±${Math.round(gps.accuracy)} ${t("m")}` : "—"}
               />
+              <Stat
+                icon={<BatteryMedium className="h-3.5 w-3.5" />}
+                label={t("Battery")}
+                value={batteryLevel === null ? "—" : `${batteryLevel}%`}
+                tone={batteryLevel !== null && batteryLevel <= 20 ? "danger" : "default"}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3.5">
@@ -1482,7 +1887,7 @@ export function CameraStreamView() {
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
                   {uploadMode === "events"
-                    ? t("The camera stays open and detects on the phone. A full photo is sent only when a person or animal is confirmed; a tiny 35 s thumbnail keeps the link alive.")
+                    ? t("The camera stays open and detects on the phone. A full photo is sent only when an animal is confirmed (55% or higher); a tiny 30 s heartbeat keeps the link alive.")
                     : t("Live preview mode sends regular photos. It uses more mobile data and battery.")}
                 </p>
               </div>
@@ -1503,6 +1908,36 @@ export function CameraStreamView() {
                   className={cn(
                     "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
                     uploadMode === "events" ? "translate-x-5" : "translate-x-0.5",
+                  )}
+                />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/5 p-3.5">
+              <div className="min-w-0">
+                <p className="flex items-center gap-1.5 text-sm font-semibold">
+                  <Moon className="h-3.5 w-3.5 text-sky-300" />
+                  {t("Battery saver / dim screen")}
+                </p>
+                <p className="mt-1 text-[11px] leading-relaxed text-slate-400">
+                  {t("Dims the preview and checks every 2 seconds instead of every second. Detection and the 15-second alert cooldown still work.")}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={batterySaver}
+                aria-label={t("Battery saver / dim screen")}
+                onClick={toggleBatterySaver}
+                className={cn(
+                  "relative h-7 w-12 shrink-0 rounded-full transition-colors",
+                  batterySaver ? "bg-sky-500" : "bg-slate-600",
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute top-0.5 h-6 w-6 rounded-full bg-white shadow transition-transform",
+                    batterySaver ? "translate-x-5" : "translate-x-0.5",
                   )}
                 />
               </button>
@@ -1608,7 +2043,7 @@ export function CameraStreamView() {
               <p className="flex items-start gap-2 text-xs leading-relaxed text-slate-400">
               <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
               {t(
-                "Detection runs on this phone. Only people and animals are tracked. Small JPEG snapshots and event records are sent to the dashboard; this is not continuous video recording.",
+                "Detection runs on this phone. Only animals raise an intrusion photo; people are still shown on the live overlay. Small JPEG snapshots and event records are sent to the dashboard; this is not continuous video recording.",
               )}
             </p>
           </>

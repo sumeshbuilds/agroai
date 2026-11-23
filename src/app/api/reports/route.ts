@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import { listReports } from "@/lib/queries";
@@ -25,12 +25,13 @@ export async function GET(request: NextRequest) {
     const limit = limitParam === null ? 10 : Number(limitParam);
     const cropId = cropIdParam === null ? undefined : Number(cropIdParam);
 
-    const db = getDb();
-    const reports = await listReports(db, {
-      farmerId: farmer.id,
-      limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50) : 10,
-      cropId: Number.isFinite(cropId) ? cropId : undefined,
-    });
+    const reports = await withFarmer(farmer.id, (db) =>
+      listReports(db, {
+        farmerId: farmer.id,
+        limit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 50) : 10,
+        cropId: Number.isFinite(cropId) ? cropId : undefined,
+      }),
+    );
 
     return ok({ reports });
   } catch (error) {

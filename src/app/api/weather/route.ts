@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import { getFarmland } from "@/lib/queries";
@@ -28,8 +28,9 @@ export async function GET(request: NextRequest) {
     let farmName: string | null = null;
 
     if (farmId) {
-      const db = getDb();
-      const farm = await getFarmland(db, Number(farmId), farmer.id);
+      const farm = await withFarmer(farmer.id, (db) =>
+        getFarmland(db, Number(farmId), farmer.id),
+      );
       if (!farm) return fail(`Farm ${farmId} was not found on your account.`, 404);
       latitude = farm.centroidLat;
       longitude = farm.centroidLng;

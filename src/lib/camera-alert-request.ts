@@ -20,12 +20,14 @@ export function parseCameraAlarmAcknowledgement(value: unknown): CameraAlarmAckn
 }
 
 export function parseCameraAlarmQuery(params: URLSearchParams) {
-  for (const key of ["before", "after", "exclude", "limit", "all"]) {
+  for (const key of ["before", "after", "exclude", "limit", "all", "session"]) {
     if (params.getAll(key).length > 1) return null;
   }
   const before = params.get("before");
   const after = params.get("after");
   if ((before !== null && !/^\d+$/.test(before)) || (after !== null && !/^\d+$/.test(after))) return null;
+  const session = params.get("session");
+  if (session !== null && !/^\d+$/.test(session)) return null;
   const beforeId = before === null ? undefined : Number(before);
   const afterId = after === null ? 0 : Number(after);
   const excluded = params.get("exclude");
@@ -37,6 +39,7 @@ export function parseCameraAlarmQuery(params: URLSearchParams) {
   const limit = Number(params.get("limit") ?? 20);
   return {
     beforeId, afterId, excludedIds: [...new Set(excludedIds)],
+    ...(session !== null ? { sessionId: Number(session) } : {}),
     limit: Number.isFinite(limit) ? Math.min(50, Math.max(1, Math.round(limit))) : 20,
     includeAcknowledged: params.get("all") === "1",
   };

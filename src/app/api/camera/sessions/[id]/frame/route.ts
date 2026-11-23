@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 import { connection } from "next/server";
 
-import { cameraSessions, getDb } from "@/db";
+import { cameraSessions, withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError } from "@/lib/http";
 
@@ -27,21 +27,23 @@ export async function GET(request: Request, context: RouteContext) {
     const id = Number(rawId);
     if (!Number.isInteger(id) || id <= 0) return fail("Invalid camera id.", 400);
 
-    const rows = await getDb()
-      .select({
-        frame: cameraSessions.latestFrame,
-        frameUpdatedAt: cameraSessions.frameUpdatedAt,
-      })
-      .from(cameraSessions)
-      .where(
-        and(
-          eq(cameraSessions.id, id),
-          eq(cameraSessions.farmerId, farmer.id),
-        ),
-      )
-      .limit(1);
+    const row = await withFarmer(farmer.id, async (db) => {
+      const rows = await db
+        .select({
+          frame: cameraSessions.latestFrame,
+          frameUpdatedAt: cameraSessions.frameUpdatedAt,
+        })
+        .from(cameraSessions)
+        .where(
+          and(
+            eq(cameraSessions.id, id),
+            eq(cameraSessions.farmerId, farmer.id),
+          ),
+        )
+        .limit(1);
+      return rows[0] ?? null;
+    });
 
-    const row = rows[0];
     if (!row?.frame) return fail("No frame received yet.", 404);
     const version = row.frameUpdatedAt?.getTime().toString() ?? "";
     const requestedVersion = new URL(request.url).searchParams.get("v");

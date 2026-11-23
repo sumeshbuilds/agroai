@@ -5,6 +5,7 @@ import Link from "next/link";
 import QRCode from "react-qr-code";
 import {
   Activity,
+  BatteryMedium,
   Bot,
   Camera,
   CameraOff,
@@ -25,12 +26,15 @@ import {
   RefreshCw,
   Ruler,
   ShieldAlert,
+  ShieldCheck,
   Signal,
   Smartphone,
   Sparkles,
   Trash2,
   Users,
+  Video,
   WifiOff,
+  X,
 } from "lucide-react";
 
 import { SetupNotice } from "@/components/setup/SetupNotice";
@@ -42,10 +46,16 @@ import { ApiError, api } from "@/lib/api-client";
 import {
   CATEGORY_STYLES,
   cameraStats,
+  type CameraAlertDTO,
   type CameraDetectionDTO,
   type CameraSessionDTO,
 } from "@/lib/camera";
 import { formatRelative } from "@/lib/format";
+import {
+  batteryPercentLabel,
+  LIVE_PEEK_DURATION_MS,
+  LIVE_PEEK_ICE_SERVERS,
+} from "@/lib/security-camera";
 import {
   nextPollDelay,
   nextSessionListDelay,
@@ -108,6 +118,7 @@ export function WatchView() {
   const [networkIps, setNetworkIps] = useState<string[]>([]);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [peekOpen, setPeekOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -198,6 +209,7 @@ export function WatchView() {
     previewRef.current = null;
     setPreviewFrame(null);
     setDetailError(null);
+    setPeekOpen(false);
     setSelectedId(id);
   }, []);
 
@@ -772,6 +784,7 @@ export function WatchView() {
                 frameAge={frameAge}
                 syncState={syncState}
                 online={network.online}
+                onLivePeek={() => setPeekOpen(true)}
               />
 
               <section aria-label={t("Camera statistics")} className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -881,6 +894,11 @@ export function WatchView() {
                   </ul>
                 )}
               </section>
+
+              <IntrusionFeed
+                key={selectedSession?.id ?? "none"}
+                sessionId={selectedSession?.id ?? null}
+              />
             </div>
 
             <aside className="min-w-0 space-y-5">
@@ -1151,6 +1169,12 @@ export function WatchView() {
           </div>
         </>
       )}
+      {peekOpen && selectedSession ? (
+        <LivePeekDialog
+          session={selectedSession}
+          onClose={() => setPeekOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }
@@ -1161,15 +1185,33 @@ function LivePlayer({
   frameAge,
   syncState,
   online,
+  onLivePeek,
 }: {
   session: CameraSessionDTO | null;
   frame: CameraPreviewFrame | null;
   frameAge: number | null;
   syncState: "idle" | "ok" | "retrying";
   online: boolean;
+  onLivePeek: () => void;
 }) {
   const { t } = useI18n();
   const detections = frame?.detections ?? [];
+  const securityStatus = session?.securityStatus ?? (session?.isLive ? "armed" : "offline");
+  const statusLabel =
+    securityStatus === "live_peek"
+      ? t("Live peek")
+      : securityStatus === "armed"
+        ? t("Armed")
+        : securityStatus === "ended"
+          ? t("Stopped")
+          : t("Offline");
+  const statusTone =
+    securityStatus === "live_peek"
+      ? "border-sky-400/40 bg-sky-500/20 text-sky-200"
+      : securityStatus === "armed"
+        ? "border-emerald-400/40 bg-emerald-500/20 text-emerald-200"
+        : "border-white/15 bg-slate-800/80 text-slate-300";
+  const battery = batteryPercentLabel(session?.batteryLevel ?? null);
   return (
     <section className="camera-surface relative overflow-hidden rounded-2xl bg-slate-950 shadow-[var(--shadow-card)]" aria-label={t("Camera preview")}>
       <div
@@ -1339,30 +1381,61 @@ function LivePlayer({
       </div>
 
       <footer className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-900 px-4 py-3.5">
-        <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
-          <Camera className="h-3.5 w-3.5 text-leaf-300" />
-          {session?.name ?? t("Field camera")}
-          {session?.deviceLabel ? (
-            <span className="font-normal text-slate-400">
-              · {session.deviceLabel}
+        <div className="min-w-0">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-slate-200">
+            <Camera className="h-3.5 w-3.5 text-leaf-300" />
+            {session?.name ?? t("Field camera")}
+            {session?.deviceLabel ? (
+              <span className="font-normal text-slate-400">
+                · {session.deviceLabel}
+              </span>
+            ) : null}
+          </p>
+          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+            <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-bold backdrop-blur ${statusTone}`}>
+              <ShieldCheck className="h-3 w-3" />
+              {statusLabel}
             </span>
-          ) : null}
-        </p>
-        <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
-          {session?.lastSeenAt ? (
-            <>
-              <Radio className="h-3 w-3" />
-              {t("Last frame {time}", {
-                time: t(formatRelative(session.lastSeenAt)),
-              })}
-            </>
-          ) : (
-            <>
-              <WifiOff className="h-3 w-3" />
-              {t("No frames received")}
-            </>
-          )}
-        </p>
+            {battery ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-300">
+                <BatteryMedium className="h-3 w-3" />
+                {battery}
+              </span>
+            ) : null}
+            {session?.heartbeatAge ? (
+              <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-slate-400">
+                <Radio className="h-3 w-3" />
+                {t("Seen {time}", { time: t(session.heartbeatAge) })}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="flex items-center gap-1.5 text-[10px] font-medium text-slate-400">
+            {session?.lastSeenAt ? (
+              <>
+                <Radio className="h-3 w-3" />
+                {t("Last frame {time}", {
+                  time: t(formatRelative(session.lastSeenAt)),
+                })}
+              </>
+            ) : (
+              <>
+                <WifiOff className="h-3 w-3" />
+                {t("No frames received")}
+              </>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={onLivePeek}
+            disabled={!session || session.status === "ended"}
+            className="btn btn-secondary border-white/15 bg-white/5 text-slate-100 hover:bg-white/10 disabled:opacity-50"
+          >
+            <Video className="h-3.5 w-3.5" />
+            {t("Live Peek (60s)")}
+          </button>
+        </div>
       </footer>
     </section>
   );
@@ -1427,4 +1500,367 @@ function lanScore(address: string): number {
   if (/^172\.(1[6-9]|2\d|3[01])\./.test(address)) return 2;
   if (address.startsWith("100.")) return 1;
   return 0;
+}
+
+/** Unread animal intrusions with the saved evidence frame. */
+function IntrusionFeed({ sessionId }: { sessionId: number | null }) {
+  const { t } = useI18n();
+  const [alerts, setAlerts] = useState<CameraAlertDTO[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [resolving, setResolving] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    let stopped = false;
+    let timer = 0;
+    let controller: AbortController | null = null;
+    const load = async () => {
+      controller?.abort();
+      controller = new AbortController();
+      try {
+        const page = await api.listCameraAlerts({
+          limit: 12,
+          sessionId,
+          signal: controller.signal,
+        });
+        if (stopped) return;
+        setAlerts(page.alerts);
+        setError(null);
+      } catch (cause) {
+        if (stopped) return;
+        setError(
+          cause instanceof ApiError && cause.status === 401
+            ? "Sign in to view intrusion alerts."
+            : "Could not load intrusion alerts.",
+        );
+      } finally {
+        if (!stopped) setLoading(false);
+      }
+    };
+    void load();
+    timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") void load();
+    }, 5_000);
+    return () => {
+      stopped = true;
+      controller?.abort();
+      window.clearInterval(timer);
+    };
+  }, [sessionId]);
+
+  const resolve = async (id: number) => {
+    setResolving(id);
+    try {
+      await api.acknowledgeCameraAlert(id);
+      setAlerts((current) => current.filter((item) => item.id !== id));
+      setError(null);
+    } catch {
+      setError("Could not mark the alert resolved. Try again.");
+    } finally {
+      setResolving(null);
+    }
+  };
+
+  return (
+    <section className="card overflow-hidden">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--border)] p-5">
+        <div>
+          <h2 className="flex items-center gap-2 text-base font-semibold">
+            <ShieldAlert className="h-4 w-4 text-danger-600" />
+            {t("Intrusion alerts")}
+          </h2>
+          <p className="muted mt-1.5 text-xs leading-relaxed">
+            {t("Animal events saved by this camera, with the evidence photo.")}
+          </p>
+        </div>
+        <span className="chip chip-danger">
+          {t("{count} unresolved", { count: alerts.length })}
+        </span>
+      </header>
+
+      {error ? (
+        <p role="status" className="border-b border-[var(--border)] px-5 py-3 text-xs font-semibold text-warn-700">
+          {t(error)}
+        </p>
+      ) : null}
+
+      {loading && sessionId ? (
+        <div className="space-y-3 p-5">
+          <div className="h-20 animate-pulse-soft rounded-xl bg-[var(--card-muted)]" />
+          <div className="h-20 animate-pulse-soft rounded-xl bg-[var(--card-muted)]" />
+        </div>
+      ) : !sessionId || alerts.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 px-5 py-10 text-center">
+          <ShieldCheck className="h-6 w-6 text-leaf-600" />
+          <p className="text-sm font-semibold">{t("No intrusion alerts")}</p>
+          <p className="muted max-w-sm text-xs leading-relaxed">
+            {t("The camera is armed. When an animal is detected, the photo and confidence appear here.")}
+          </p>
+        </div>
+      ) : (
+        <ul className="divide-y divide-[var(--border)]">
+          {alerts.map((alert) => (
+            <li key={alert.id} className="flex flex-wrap items-center gap-3 px-5 py-4">
+              {alert.imageUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={alert.imageUrl}
+                  alt={t("Evidence photo: {message}", { message: t(alert.message) })}
+                  loading="lazy"
+                  className="h-20 w-24 shrink-0 rounded-lg bg-black object-cover"
+                />
+              ) : (
+                <span className="flex h-20 w-24 shrink-0 items-center justify-center rounded-lg bg-[var(--card-muted)] text-2xl">
+                  {alert.emoji}
+                </span>
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="break-words text-sm font-semibold">{t(alert.message)}</p>
+                <p className="muted mt-1 text-xs">
+                  {alert.label}
+                  {alert.confidence !== null
+                    ? ` · ${Math.round(alert.confidence * 100)}%`
+                    : ""}
+                  {" · "}
+                  {t(formatRelative(alert.capturedAt ?? alert.createdAt))}
+                </p>
+                {alert.reviewStatus === "unconfirmed" ? (
+                  <p className="mt-1 text-xs font-semibold text-warn-700">
+                    {t("Needs human review")}
+                  </p>
+                ) : null}
+              </div>
+              <button
+                type="button"
+                onClick={() => void resolve(alert.id)}
+                disabled={resolving === alert.id}
+                className="btn btn-secondary shrink-0"
+              >
+                <Check className="h-4 w-4" />
+                {resolving === alert.id ? t("Saving…") : t("Mark Resolved")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
+/** 60-second peer-to-peer preview. Only SDP text touches the server. */
+function LivePeekDialog({
+  session,
+  onClose,
+}: {
+  session: CameraSessionDTO;
+  onClose: () => void;
+}) {
+  const { t } = useI18n();
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const pcRef = useRef<RTCPeerConnection | null>(null);
+  const [status, setStatus] = useState<
+    "connecting" | "waiting" | "live" | "ended" | "error"
+  >("connecting");
+  const [error, setError] = useState<string | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState(
+    Math.round(LIVE_PEEK_DURATION_MS / 1_000),
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    let pollTimer = 0;
+    let countdownTimer = 0;
+    let peekId: number | null = null;
+    const pc = new RTCPeerConnection({ iceServers: LIVE_PEEK_ICE_SERVERS });
+    pcRef.current = pc;
+    const remote = new MediaStream();
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = remote;
+      void video.play().catch(() => undefined);
+    }
+
+    pc.ontrack = (event) => {
+      if (event.streams[0]) {
+        event.streams[0].getTracks().forEach((track) => {
+          if (!remote.getTracks().some((item) => item.id === track.id)) {
+            remote.addTrack(track);
+          }
+        });
+      } else {
+        remote.addTrack(event.track);
+      }
+      if (video) void video.play().catch(() => undefined);
+      if (!cancelled) setStatus("live");
+    };
+    pc.onconnectionstatechange = () => {
+      if (
+        pc.connectionState === "failed" ||
+        pc.connectionState === "disconnected"
+      ) {
+        if (!cancelled) setStatus("ended");
+      }
+    };
+
+    const start = async () => {
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      const sdp = pc.localDescription?.sdp ?? offer.sdp;
+      if (!sdp) throw new Error("Could not create a WebRTC offer.");
+      const result = await api.startCameraPeek(session.id, sdp);
+      peekId = result.peek.id;
+      const until = new Date(result.livePeekUntil).getTime();
+      if (Number.isFinite(until)) {
+        setSecondsLeft(Math.max(0, Math.round((until - Date.now()) / 1_000)));
+      }
+      if (cancelled) return;
+      setStatus("waiting");
+
+      const poll = async () => {
+        if (cancelled || !peekId) return;
+        try {
+          const current = await api.getCameraPeek(session.id, peekId);
+          if (current.peek.answer) {
+            await pc.setRemoteDescription({
+              type: "answer",
+              sdp: current.peek.answer,
+            });
+            if (!cancelled) setStatus("live");
+            return;
+          }
+          if (current.peek.status === "ended") {
+            if (!cancelled) setStatus("ended");
+            return;
+          }
+        } catch {
+          // Keep polling until the 60-second window closes.
+        }
+        pollTimer = window.setTimeout(() => void poll(), 1_000);
+      };
+      pollTimer = window.setTimeout(() => void poll(), 700);
+
+      countdownTimer = window.setInterval(() => {
+        if (cancelled) return;
+        setSecondsLeft((value) => {
+          if (value <= 1) {
+            window.clearInterval(countdownTimer);
+            setStatus("ended");
+            return 0;
+          }
+          return value - 1;
+        });
+      }, 1_000);
+    };
+
+    void start().catch((cause) => {
+      if (cancelled) return;
+      setStatus("error");
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not start Live Peek.",
+      );
+    });
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(pollTimer);
+      window.clearInterval(countdownTimer);
+      pc.close();
+      if (pcRef.current === pc) pcRef.current = null;
+      if (peekId) {
+        void api.endCameraPeek(session.id, peekId).catch(() => undefined);
+      }
+    };
+  }, [session.id]);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label={t("Live Peek")}
+      className="fixed inset-0 z-[1200] flex items-center justify-center bg-black/75 p-4"
+    >
+      <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-slate-950 text-slate-100 shadow-2xl">
+        <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+          <div>
+            <h2 className="flex items-center gap-2 text-sm font-semibold">
+              <Video className="h-4 w-4 text-sky-300" />
+              {t("Live Peek")}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-400">
+              {t("60-second on-demand video. It stops automatically.")}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label={t("Close Live Peek")}
+            className="icon-btn border-white/15 bg-transparent text-slate-100"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        <div className="relative aspect-video bg-black">
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="h-full w-full object-contain"
+          />
+          {status !== "live" ? (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 text-center">
+              <p className="text-sm font-semibold">
+                {status === "error"
+                  ? t("Live Peek failed")
+                  : status === "ended"
+                    ? t("Live Peek ended")
+                    : t("Connecting to the phone…")}
+              </p>
+              <p className="max-w-sm text-xs leading-relaxed text-slate-400">
+                {error ??
+                  t(
+                    status === "waiting"
+                      ? "Waiting for the phone to answer. Keep the camera page open."
+                      : "The phone sends video directly; it never passes through the server.",
+                  )}
+              </p>
+            </div>
+          ) : null}
+          <div className="pointer-events-none absolute left-3 top-3 flex gap-2">
+            <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">
+              {status === "live"
+                ? t("LIVE")
+                : status === "waiting"
+                  ? t("Waiting")
+                  : status === "error"
+                    ? t("Error")
+                    : t("Connecting")}
+            </span>
+            <span className="rounded-full bg-black/60 px-2.5 py-1 text-[10px] font-bold text-white backdrop-blur">
+              {t("{seconds}s left", { seconds: secondsLeft })}
+            </span>
+          </div>
+        </div>
+
+        <footer className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
+          <p className="text-xs text-slate-400">
+            {t("Video is peer-to-peer (STUN). Only signalling text touches the server.")}
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn btn-secondary border-white/15 bg-white/5 text-slate-100"
+          >
+            {t("Close")}
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
 }

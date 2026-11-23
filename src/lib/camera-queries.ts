@@ -5,11 +5,13 @@ import { and, desc, eq, getTableColumns, gt, inArray, isNull, lt, lte, ne, notIn
 import {
   cameraAlerts,
   cameraDetections,
+  cameraPeekSessions,
   cameraSessions,
   farmlands,
   farmers,
   type CameraAlert,
   type CameraDetection,
+  type CameraPeekSession,
   type CameraSession,
   type Database,
 } from "@/db";
@@ -26,6 +28,7 @@ import {
   type CameraAlertPage,
   type CameraDetectionDTO,
   type CameraIngestPayload,
+  type CameraPeekDTO,
   type CameraSessionDTO,
   type DetectionBox,
   type DetectionCategory,
@@ -34,6 +37,12 @@ import {
   type IngestDetection,
   type TrackedCategory,
 } from "./camera";
+import {
+  cameraDeviceStatus,
+  heartbeatAgeLabel,
+  LIVE_PEEK_DURATION_MS,
+  type CameraDeviceStatus,
+} from "./security-camera";
 import { verifyFrameWithGroq, type GroqVerdict } from "./groq";
 
 const MAX_DETECTIONS_PER_FRAME = 12;
@@ -49,9 +58,21 @@ function toIso(value: Date | string | null | undefined): string | null {
   return value instanceof Date ? value.toISOString() : value;
 }
 
+/** Phone timestamps are advisory; reject impossible/far-future values. */
+function parseCapturedAt(value: string | undefined | null): Date | null {
+  if (!value) return null;
+  const parsed = new Date(value);
+  if (!Number.isFinite(parsed.getTime())) return null;
+  const skew = Math.abs(Date.now() - parsed.getTime());
+  return skew <= 7 * 24 * 60 * 60 * 1_000 ? parsed : null;
+}
+
 function isLiveSession(session: CameraSession): boolean {
-  if (session.status !== "live" || !session.lastSeenAt) return false;
-  return Date.now() - new Date(session.lastSeenAt).getTime() <= LIVE_WINDOW_MS;
+  if (session.status === "ended") return false;
+  const lastSeen =
+    session.lastHeartbeat ?? session.lastSeenAt ?? null;
+  if (!lastSeen) return false;
+  return Date.now() - new Date(lastSeen).getTime() <= LIVE_WINDOW_MS;
 }
 
 function farmForPoint(
@@ -121,6 +142,17 @@ function toCameraSessionDTO(
     frameHeight: session.frameHeight ?? null,
     frameUpdatedAt: toIso(session.frameUpdatedAt),
     lastSeenAt: toIso(session.lastSeenAt),
+    batteryLevel: session.batteryLevel ?? null,
+    lastHeartbeat: toIso(session.lastHeartbeat),
+    pairingExpiresAt: toIso(session.pairingExpiresAt),
+    lastEventAt: toIso(session.lastEventAt),
+    livePeekUntil: toIso(session.livePeekUntil),
+    securityStatus: cameraDeviceStatus({
+      status: session.status,
+      lastHeartbeat: session.lastHeartbeat ?? session.lastSeenAt,
+      livePeekUntil: session.livePeekUntil,
+    }),
+    heartbeatAge: heartbeatAgeLabel(session.lastHeartbeat ?? session.lastSeenAt),
     startedAt: toIso(session.startedAt),
     endedAt: toIso(session.endedAt),
     createdAt: toIso(session.createdAt),
@@ -167,6 +199,10 @@ function toAlertDTO(alert: CameraAlert, sessionName: string): CameraAlertDTO {
     reviewStatus: alert.verified ? "confirmed" : alert.source === "groq" ? "unconfirmed" : "pending",
     lat: alert.lat,
     lng: alert.lng,
+    imageUrl:
+      alert.imageUrl ??
+      (alert.imageData ? `/api/camera/alerts/${alert.id}/image` : null),
+    capturedAt: toIso(alert.capturedAt ?? alert.createdAt),
     createdAt: toIso(alert.createdAt),
     acknowledgedAt: toIso(alert.acknowledgedAt),
   };
@@ -182,9 +218,16 @@ export async function createCameraSession(
   name: string,
 ): Promise<CameraSessionDTO> {
   const token = randomBytes(12).toString("base64url");
+  const now = Date.now();
   const inserted = await db
     .insert(cameraSessions)
-    .values({ farmerId, token, name })
+    .values({
+      farmerId,
+      token,
+      name,
+      status: "waiting",
+      pairingExpiresAt: new Date(now + 30 * 24 * 60 * 60 * 1_000),
+    })
     .returning();
 
   return toCameraSessionDTO(inserted[0]);
@@ -496,6 +539,7 @@ export async function ingestCameraFrame(
       ...seen.filter((row) => row.alert === null).map((row) => row.detection),
     ];
     if (needsAlarm.length > 0) {
+      const capturedAt = parseCapturedAt(payload.capturedAt) ?? now;
       alerts = await db.insert(cameraAlerts).values(needsAlarm.map((detection) => {
         const category: TrackedCategory = detection.category === "person" ? "person" : "animal";
         return {
@@ -511,8 +555,22 @@ export async function ingestCameraFrame(
           verified: detection.verified,
           lat: detection.lat,
           lng: detection.lng,
+          // The same frozen frame that produced the detection is the evidence.
+          // It is stored once per event, not per uploaded frame.
+          imageData: payload.frame,
+          capturedAt,
         };
       })).returning();
+
+      // Owner-scoped evidence URL; the row id is only known after insertion.
+      await Promise.all(
+        alerts.map((alert) =>
+          db
+            .update(cameraAlerts)
+            .set({ imageUrl: `/api/camera/alerts/${alert.id}/image` })
+            .where(eq(cameraAlerts.id, alert.id)),
+        ),
+      );
     }
     // A timed-out client may retry a frame that was already saved. Return its
     // existing unread receipts too, rather than losing the phone's popup.
@@ -522,7 +580,7 @@ export async function ingestCameraFrame(
   const updatedRows = await db
     .update(cameraSessions)
     .set({
-      status: "live",
+      status: "armed",
       latestFrame: payload.frame,
       latestDetections: detections,
       frameWidth,
@@ -533,6 +591,8 @@ export async function ingestCameraFrame(
         ? payload.deviceLabel.slice(0, 80)
         : session.deviceLabel,
       lastSeenAt: now,
+      lastHeartbeat: now,
+      ...(alerts.length > 0 ? { lastEventAt: now } : {}),
       // Strictly increasing millisecond versions prevent two fast uploads
       // from exposing different pixels under the same versioned frame URL.
       frameUpdatedAt: sql`greatest(coalesce(${cameraSessions.frameUpdatedAt}, '-infinity'::timestamp) + interval '1 millisecond', ${now.toISOString()}::timestamp)`,
@@ -569,6 +629,11 @@ export async function ingestCameraFrame(
       lastSeenAt: cameraSessions.lastSeenAt,
       endedAt: cameraSessions.endedAt,
       createdAt: cameraSessions.createdAt,
+      batteryLevel: cameraSessions.batteryLevel,
+      lastHeartbeat: cameraSessions.lastHeartbeat,
+      pairingExpiresAt: cameraSessions.pairingExpiresAt,
+      lastEventAt: cameraSessions.lastEventAt,
+      livePeekUntil: cameraSessions.livePeekUntil,
     });
 
   // A stop can win the race with this update. Fall back to the session the
@@ -838,19 +903,313 @@ function humanVerdictWins(verdict: GroqVerdict): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Heartbeat, evidence images and on-demand Live Peek
+// ---------------------------------------------------------------------------
+
+/**
+ * Records the phone's 30-second heartbeat (and Battery Status API reading) and
+ * returns any pending Live Peek offer. A heartbeat is tiny JSON — it does not
+ * upload a frame, so an idle camera costs almost no mobile data.
+ */
+export async function recordCameraHeartbeat(
+  db: Database,
+  session: CameraSession,
+  input: {
+    status: CameraDeviceStatus;
+    batteryLevel: number | null;
+    deviceLabel: string | null;
+    lat: number | null;
+    lng: number | null;
+  },
+): Promise<{ session: CameraSessionDTO; peek: { id: number; offer: string; expiresAt: string } | null }> {
+  const now = new Date();
+  const rows = await db
+    .update(cameraSessions)
+    .set({
+      status: input.status === "offline" ? "offline" : input.status,
+      batteryLevel: input.batteryLevel,
+      lastHeartbeat: now,
+      lastSeenAt: now,
+      ...(input.deviceLabel ? { deviceLabel: input.deviceLabel } : {}),
+      ...(input.lat !== null ? { lat: input.lat } : {}),
+      ...(input.lng !== null ? { lng: input.lng } : {}),
+    })
+    .where(and(eq(cameraSessions.id, session.id), ne(cameraSessions.status, "ended")))
+    .returning({
+      id: cameraSessions.id,
+      farmerId: cameraSessions.farmerId,
+      name: cameraSessions.name,
+      token: cameraSessions.token,
+      status: cameraSessions.status,
+      aiEnabled: cameraSessions.aiEnabled,
+      deviceLabel: cameraSessions.deviceLabel,
+      lat: cameraSessions.lat,
+      lng: cameraSessions.lng,
+      frameUpdatedAt: cameraSessions.frameUpdatedAt,
+      frameWidth: cameraSessions.frameWidth,
+      frameHeight: cameraSessions.frameHeight,
+      latestDetections: cameraSessions.latestDetections,
+      motion: cameraSessions.motion,
+      totalDetections: cameraSessions.totalDetections,
+      startedAt: cameraSessions.startedAt,
+      lastSeenAt: cameraSessions.lastSeenAt,
+      endedAt: cameraSessions.endedAt,
+      createdAt: cameraSessions.createdAt,
+      batteryLevel: cameraSessions.batteryLevel,
+      lastHeartbeat: cameraSessions.lastHeartbeat,
+      pairingExpiresAt: cameraSessions.pairingExpiresAt,
+      lastEventAt: cameraSessions.lastEventAt,
+      livePeekUntil: cameraSessions.livePeekUntil,
+    });
+
+  const updated: CameraSession = rows[0]
+    ? { ...rows[0], latestFrame: null }
+    : session;
+
+  const pending = await db
+    .select({
+      id: cameraPeekSessions.id,
+      offer: cameraPeekSessions.offer,
+      expiresAt: cameraPeekSessions.expiresAt,
+    })
+    .from(cameraPeekSessions)
+    .where(
+      and(
+        eq(cameraPeekSessions.sessionId, session.id),
+        eq(cameraPeekSessions.status, "requested"),
+        gt(cameraPeekSessions.expiresAt, now),
+        isNull(cameraPeekSessions.answer),
+      ),
+    )
+    .orderBy(desc(cameraPeekSessions.id))
+    .limit(1);
+
+  return {
+    session: toCameraSessionDTO(updated),
+    peek: pending[0]
+      ? {
+          id: pending[0].id,
+          offer: pending[0].offer,
+          expiresAt: toIso(pending[0].expiresAt) ?? new Date().toISOString(),
+        }
+      : null,
+  };
+}
+
+/** Owner-only evidence lookup. Returns a `data:` URL or null. */
+export async function getCameraAlertImage(
+  db: Database,
+  id: number,
+  farmerId: number,
+): Promise<string | null> {
+  const rows = await db
+    .select({ imageData: cameraAlerts.imageData, imageUrl: cameraAlerts.imageUrl })
+    .from(cameraAlerts)
+    .where(and(eq(cameraAlerts.id, id), eq(cameraAlerts.farmerId, farmerId)))
+    .limit(1);
+  return rows[0]?.imageData ?? null;
+}
+
+function toPeekDTO(peek: CameraPeekSession): CameraPeekDTO {
+  return {
+    id: peek.id,
+    sessionId: peek.sessionId,
+    status:
+      peek.status === "answered" || peek.status === "ended"
+        ? peek.status
+        : "requested",
+    answer: peek.answer,
+    expiresAt: toIso(peek.expiresAt) ?? new Date().toISOString(),
+    createdAt: toIso(peek.createdAt),
+  };
+}
+
+/**
+ * The dashboard creates an SDP offer and asks for 60 seconds of video. The
+ * request is stored (not broadcast to every client), and the phone picks it up
+ * on its next heartbeat/peek poll.
+ */
+export async function startCameraPeek(
+  db: Database,
+  sessionId: number,
+  farmerId: number,
+  offer: string,
+): Promise<{ peek: CameraPeekDTO; livePeekUntil: string } | null> {
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + LIVE_PEEK_DURATION_MS);
+
+  const owned = await db
+    .select({ id: cameraSessions.id })
+    .from(cameraSessions)
+    .where(
+      and(
+        eq(cameraSessions.id, sessionId),
+        eq(cameraSessions.farmerId, farmerId),
+        ne(cameraSessions.status, "ended"),
+      ),
+    )
+    .limit(1);
+  if (owned.length === 0) return null;
+
+  // Supersede any abandoned request for this camera.
+  await db
+    .update(cameraPeekSessions)
+    .set({ status: "ended", updatedAt: now })
+    .where(
+      and(
+        eq(cameraPeekSessions.sessionId, sessionId),
+        inArray(cameraPeekSessions.status, ["requested", "answered"]),
+      ),
+    );
+
+  const inserted = await db
+    .insert(cameraPeekSessions)
+    .values({ sessionId, farmerId, offer, status: "requested", expiresAt })
+    .returning();
+  await db
+    .update(cameraSessions)
+    .set({ livePeekUntil: expiresAt, status: "live_peek" })
+    .where(eq(cameraSessions.id, sessionId));
+
+  return { peek: toPeekDTO(inserted[0]), livePeekUntil: expiresAt.toISOString() };
+}
+
+export async function getCameraPeek(
+  db: Database,
+  peekId: number,
+  farmerId: number,
+): Promise<CameraPeekDTO | null> {
+  const rows = await db
+    .select()
+    .from(cameraPeekSessions)
+    .where(
+      and(
+        eq(cameraPeekSessions.id, peekId),
+        eq(cameraPeekSessions.farmerId, farmerId),
+      ),
+    )
+    .limit(1);
+  return rows[0] ? toPeekDTO(rows[0]) : null;
+}
+
+/** Latest pending offer for this camera token. */
+export async function getPendingCameraPeek(
+  db: Database,
+  sessionId: number,
+): Promise<{ id: number; offer: string; expiresAt: string } | null> {
+  const rows = await db
+    .select({
+      id: cameraPeekSessions.id,
+      offer: cameraPeekSessions.offer,
+      expiresAt: cameraPeekSessions.expiresAt,
+    })
+    .from(cameraPeekSessions)
+    .where(
+      and(
+        eq(cameraPeekSessions.sessionId, sessionId),
+        eq(cameraPeekSessions.status, "requested"),
+        gt(cameraPeekSessions.expiresAt, new Date()),
+        isNull(cameraPeekSessions.answer),
+      ),
+    )
+    .orderBy(desc(cameraPeekSessions.id))
+    .limit(1);
+  return rows[0]
+    ? {
+        id: rows[0].id,
+        offer: rows[0].offer,
+        expiresAt: toIso(rows[0].expiresAt) ?? new Date().toISOString(),
+      }
+    : null;
+}
+
+/** Phone writes its SDP answer. Scoped by the pairing token, not a cookie. */
+export async function answerCameraPeek(
+  db: Database,
+  sessionId: number,
+  peekId: number,
+  answer: string,
+): Promise<boolean> {
+  const rows = await db
+    .update(cameraPeekSessions)
+    .set({ answer, status: "answered", updatedAt: new Date() })
+    .where(
+      and(
+        eq(cameraPeekSessions.id, peekId),
+        eq(cameraPeekSessions.sessionId, sessionId),
+        eq(cameraPeekSessions.status, "requested"),
+        gt(cameraPeekSessions.expiresAt, new Date()),
+      ),
+    )
+    .returning({ id: cameraPeekSessions.id });
+  return rows.length > 0;
+}
+
+export async function endCameraPeek(
+  db: Database,
+  peekId: number,
+  farmerId: number,
+): Promise<boolean> {
+  const rows = await db
+    .update(cameraPeekSessions)
+    .set({ status: "ended", updatedAt: new Date() })
+    .where(
+      and(
+        eq(cameraPeekSessions.id, peekId),
+        eq(cameraPeekSessions.farmerId, farmerId),
+      ),
+    )
+    .returning({ id: cameraPeekSessions.id, sessionId: cameraPeekSessions.sessionId });
+
+  if (rows[0]) {
+    await db
+      .update(cameraSessions)
+      .set({ livePeekUntil: null, status: "armed" })
+      .where(eq(cameraSessions.id, rows[0].sessionId));
+  }
+  return rows.length > 0;
+}
+
+/** Clears an expired peek so the badge falls back to Armed. */
+export async function expireCameraPeeks(db: Database, sessionId?: number): Promise<void> {
+  const now = new Date();
+  await db
+    .update(cameraPeekSessions)
+    .set({ status: "ended", updatedAt: now })
+    .where(
+      and(
+        sessionId !== undefined ? eq(cameraPeekSessions.sessionId, sessionId) : undefined,
+        inArray(cameraPeekSessions.status, ["requested", "answered"]),
+        lte(cameraPeekSessions.expiresAt, now),
+      ),
+    );
+  await db
+    .update(cameraSessions)
+    .set({ livePeekUntil: null })
+    .where(
+      and(
+        sessionId !== undefined ? eq(cameraSessions.id, sessionId) : undefined,
+        lte(cameraSessions.livePeekUntil, now),
+        ne(cameraSessions.status, "ended"),
+      ),
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Alarms
 // ---------------------------------------------------------------------------
 
 export async function listCameraAlerts(
   db: Database,
   farmerId: number,
-  options: { limit?: number; includeAcknowledged?: boolean; beforeId?: number; afterId?: number; excludedIds?: number[] } = {},
+  options: { limit?: number; includeAcknowledged?: boolean; beforeId?: number; afterId?: number; sessionId?: number; excludedIds?: number[] } = {},
 ): Promise<CameraAlertPage> {
   const limit = Math.min(50, Math.max(1, Math.round(options.limit ?? 20)));
   const owner = eq(cameraAlerts.farmerId, farmerId);
   const afterId = options.afterId ?? 0;
   const excludedIds = options.excludedIds ?? [];
   const scope = and(owner,
+    options.sessionId !== undefined ? eq(cameraAlerts.sessionId, options.sessionId) : undefined,
     afterId > 0 ? gt(cameraAlerts.id, afterId) : undefined,
     excludedIds.length > 0 ? notInArray(cameraAlerts.id, excludedIds) : undefined,
   );

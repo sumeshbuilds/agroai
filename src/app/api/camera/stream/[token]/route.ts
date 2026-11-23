@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { after, connection } from "next/server";
 
-import { cameraSessions, getDb } from "@/db";
+import { cameraSessions, getDb, withFarmer } from "@/db";
 import type { CameraIngestPayload } from "@/lib/camera";
 import {
   getCameraSessionByToken,
@@ -23,6 +23,20 @@ const VALID_FRAME_PREFIXES = [
   "data:image/webp;base64,",
 ];
 
+/**
+ * The phone streams without a login cookie, so it is authenticated by the
+ * random pairing token. This resolves the token to its owner through a
+ * SECURITY DEFINER function; every subsequent query then runs inside that
+ * farmer's RLS scope, so a token can only ever touch its own session.
+ */
+async function cameraFarmerForToken(token: string): Promise<number | null> {
+  const result = await getDb().execute(
+    sql`select auth_camera_farmer(${token}) as farmer_id`,
+  );
+  const row = result.rows[0] as { farmer_id: number | null } | undefined;
+  return row?.farmer_id ?? null;
+}
+
 /** GET /api/camera/stream/:token — pairing info for the phone page. */
 export async function GET(_request: Request, context: RouteContext) {
   await connection();
@@ -31,7 +45,14 @@ export async function GET(_request: Request, context: RouteContext) {
     const { token } = await context.params;
     if (!token || token.length > 64) return fail("Invalid camera link.", 400);
 
-    const detail = await getCameraSessionByToken(getDb(), token);
+    const farmerId = await cameraFarmerForToken(token);
+    if (farmerId === null) {
+      return fail("This camera link is not valid any more.", 404);
+    }
+
+    const detail = await withFarmer(farmerId, (db) =>
+      getCameraSessionByToken(db, token),
+    );
     if (!detail) return fail("This camera link is not valid any more.", 404);
 
     return ok(detail);
@@ -41,7 +62,7 @@ export async function GET(_request: Request, context: RouteContext) {
 }
 
 /**
- * Reads either the legacy JSON body (`{ frame: dataUrl, … }`) or the
+ * Reads either the legacy JSON body (`{ frame: dataUrl, ... }`) or the
  * bandwidth-friendly multipart body (`meta` JSON + raw JPEG `frame` blob).
  * Multipart avoids the ~33% base64 overhead on the phone's mobile data.
  */
@@ -130,45 +151,64 @@ export async function POST(request: Request, context: RouteContext) {
     const { token } = await context.params;
     if (!token || token.length > 64) return fail("Invalid camera link.", 400);
 
-    const db = getDb();
-    const rows = await db
-      .select(cameraSessionMetadataColumns)
-      .from(cameraSessions)
-      .where(eq(cameraSessions.token, token))
-      .limit(1);
-
-    const session = rows[0];
-    if (!session) return fail("This camera link is not valid any more.", 404);
-
-    if (session.status === "ended") {
-      return fail("This stream was stopped from the dashboard.", 409, {
-        code: "STREAM_STOPPED",
-      });
+    const farmerId = await cameraFarmerForToken(token);
+    if (farmerId === null) {
+      return fail("This camera link is not valid any more.", 404);
     }
 
     const parsed = await readIngest(request);
     if ("error" in parsed) return parsed.error;
 
     const body = parsed.body;
-    const result = await ingestCameraFrame(db, session, {
-      ...body,
-      detections: Array.isArray(body.detections)
-        ? body.detections.slice(0, 12)
-        : [],
+
+    const outcome = await withFarmer(farmerId, async (db) => {
+      const rows = await db
+        .select(cameraSessionMetadataColumns)
+        .from(cameraSessions)
+        .where(eq(cameraSessions.token, token))
+        .limit(1);
+
+      const session = rows[0];
+      if (!session) return { missing: true } as const;
+
+      if (session.status === "ended") {
+        return { stopped: true } as const;
+      }
+
+      const result = await ingestCameraFrame(db, session, {
+        ...body,
+        detections: Array.isArray(body.detections)
+          ? body.detections.slice(0, 12)
+          : [],
+      });
+      if (result.session.status === "ended") {
+        return { stopped: true } as const;
+      }
+
+      return { result } as const;
     });
-    if (result.session.status === "ended") {
-      return fail("This stream was stopped from the dashboard.", 409, { code: "STREAM_STOPPED" });
+
+    if ("missing" in outcome) {
+      return fail("This camera link is not valid any more.", 404);
+    }
+    if ("stopped" in outcome) {
+      return fail("This stream was stopped from the dashboard.", 409, {
+        code: "STREAM_STOPPED",
+      });
     }
 
+    const { result } = outcome;
     const verification = result.verification;
     if (verification && isGroqConfigured()) {
       after(async () => {
         try {
-          await verifyCameraDetections(
-            getDb(),
-            result.session.id,
-            verification.ids,
-            verification.frame,
+          await withFarmer(farmerId, (db) =>
+            verifyCameraDetections(
+              db,
+              result.session.id,
+              verification.ids,
+              verification.frame,
+            ),
           );
         } catch (error) {
           console.warn("[camera] Groq verification failed:", error);

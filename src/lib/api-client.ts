@@ -8,8 +8,12 @@ import type {
 import type {
   CameraAlertPage,
   CameraDetectionDTO,
+  CameraHeartbeatPayload,
+  CameraHeartbeatResponse,
   CameraIngestPayload,
   CameraIngestResponse,
+  CameraPeekDTO,
+  CameraPeekStartResponse,
   CameraSessionDTO,
 } from "./camera";
 import type { DiseaseScanDTO } from "./disease";
@@ -124,6 +128,17 @@ export const api = {
     request<{ farm: FarmDTO }>("/api/farms", {
       method: "POST",
       body: JSON.stringify(input),
+    }),
+
+  renameFarm: (farmId: number, name: string) =>
+    request<{ farm: FarmDTO }>(`/api/farms/${farmId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    }),
+
+  deleteFarm: (farmId: number) =>
+    request<{ removed: boolean }>(`/api/farms/${farmId}`, {
+      method: "DELETE",
     }),
 
   getWeatherByFarm: (farmId: number) =>
@@ -259,11 +274,81 @@ export const api = {
       },
     ),
 
-  listCameraAlerts: (options?: { limit?: number; beforeId?: number; afterId?: number; excludedIds?: number[]; includeAcknowledged?: boolean; signal?: AbortSignal }) => {
+  /** 30-second phone heartbeat (battery + status) and pending Live Peek offer. */
+  postCameraHeartbeat: (
+    token: string,
+    payload: CameraHeartbeatPayload,
+    options?: { signal?: AbortSignal },
+  ) =>
+    request<CameraHeartbeatResponse>(
+      `/api/camera/stream/${encodeURIComponent(token)}/heartbeat`,
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+        signal: options?.signal,
+        cache: "no-store",
+      },
+    ),
+
+  /** Phone-side poll for a dashboard Live Peek offer. */
+  getCameraPeekOffer: (token: string, options?: { signal?: AbortSignal }) =>
+    request<{ ok: boolean; peek: { id: number; offer: string; expiresAt: string } | null }>(
+      `/api/camera/stream/${encodeURIComponent(token)}/peek`,
+      { signal: options?.signal, cache: "no-store" },
+    ),
+
+  /** Phone-side SDP answer for a Live Peek offer. */
+  answerCameraPeek: (
+    token: string,
+    id: number,
+    answer: string,
+    options?: { signal?: AbortSignal },
+  ) =>
+    request<{ ok: boolean }>(
+      `/api/camera/stream/${encodeURIComponent(token)}/peek`,
+      {
+        method: "POST",
+        body: JSON.stringify({ id, answer }),
+        signal: options?.signal,
+      },
+    ),
+
+  /** Dashboard-side: store an SDP offer and request 60 seconds of video. */
+  startCameraPeek: (sessionId: number, offer: string, options?: { signal?: AbortSignal }) =>
+    request<CameraPeekStartResponse>(`/api/camera/sessions/${sessionId}/peek`, {
+      method: "POST",
+      body: JSON.stringify({ offer }),
+      signal: options?.signal,
+    }),
+
+  /** Dashboard-side: poll for the phone's SDP answer. */
+  getCameraPeek: (
+    sessionId: number,
+    peekId: number,
+    options?: { signal?: AbortSignal },
+  ) =>
+    request<{ ok: boolean; peek: CameraPeekDTO }>(
+      `/api/camera/sessions/${sessionId}/peek?peekId=${peekId}`,
+      { signal: options?.signal, cache: "no-store" },
+    ),
+
+  /** Dashboard-side: stop the Live Peek before its 60-second timeout. */
+  endCameraPeek: (
+    sessionId: number,
+    peekId: number,
+    options?: { signal?: AbortSignal },
+  ) =>
+    request<{ ok: boolean }>(
+      `/api/camera/sessions/${sessionId}/peek?peekId=${peekId}`,
+      { method: "DELETE", signal: options?.signal },
+    ),
+
+  listCameraAlerts: (options?: { limit?: number; beforeId?: number; afterId?: number; sessionId?: number; excludedIds?: number[]; includeAcknowledged?: boolean; signal?: AbortSignal }) => {
     const params = new URLSearchParams();
     if (options?.limit !== undefined) params.set("limit", String(options.limit));
     if (options?.beforeId !== undefined) params.set("before", String(options.beforeId));
     if (options?.afterId) params.set("after", String(options.afterId));
+    if (options?.sessionId) params.set("session", String(options.sessionId));
     if (options?.excludedIds?.length) params.set("exclude", options.excludedIds.join(","));
     if (options?.includeAcknowledged) params.set("all", "1");
     const query = params.toString();

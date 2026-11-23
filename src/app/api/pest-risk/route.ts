@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { fail, handleRouteError, ok } from "@/lib/http";
 import { assessPestRisk } from "@/lib/pest-risk";
@@ -27,21 +27,24 @@ export async function GET(request: NextRequest) {
       return fail("Sign in to analyse pest risk.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    const db = getDb();
     const cropIdParam = request.nextUrl.searchParams.get("cropId");
 
-    let row: Awaited<ReturnType<typeof getCropWithFarm>> = null;
-
+    let cropId: number | null = null;
     if (cropIdParam !== null) {
-      const cropId = Number(cropIdParam);
-      if (!Number.isFinite(cropId)) {
+      const parsed = Number(cropIdParam);
+      if (!Number.isFinite(parsed)) {
         return fail("cropId must be a number.", 400);
       }
-      row = await getCropWithFarm(db, cropId, farmer.id);
-    } else {
-      const active = await listActiveCropsWithFarm(db, farmer.id);
-      row = active[0] ?? null;
+      cropId = parsed;
     }
+
+    const row = await withFarmer(farmer.id, async (db) => {
+      if (cropId !== null) {
+        return getCropWithFarm(db, cropId, farmer.id);
+      }
+      const active = await listActiveCropsWithFarm(db, farmer.id);
+      return active[0] ?? null;
+    });
 
     if (!row) {
       return fail(

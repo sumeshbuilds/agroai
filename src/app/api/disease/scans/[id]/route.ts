@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { deleteDiseaseScan } from "@/lib/disease-queries";
 import { fail, handleRouteError, ok } from "@/lib/http";
@@ -20,7 +20,9 @@ export async function DELETE(
       return fail("That scan id is not valid.", 400);
     }
 
-    const removed = await deleteDiseaseScan(getDb(), scanId, farmer.id);
+    const removed = await withFarmer(farmer.id, (db) =>
+      deleteDiseaseScan(db, scanId, farmer.id),
+    );
     if (!removed) {
       return fail("That scan was not found.", 404, { code: "SCAN_NOT_FOUND" });
     }

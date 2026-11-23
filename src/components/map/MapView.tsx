@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { MapPin, Satellite } from "lucide-react";
 
 import { SetupNotice } from "@/components/setup/SetupNotice";
+import { FarmManager } from "@/components/map/FarmManager";
 import { WorkbenchBar } from "@/components/layout/PageBar";
 import { Callout } from "@/components/ui/Callout";
 import { api } from "@/lib/api-client";
@@ -82,6 +83,8 @@ export function MapView() {
           {t(notice)}
         </Callout>
       ) : null}
+
+      <FarmManager farms={farms} onChanged={refresh} />
 
       <div className="min-h-0 flex-1 pt-5">
         <SetupNotice showDatabase={needsSetup} />

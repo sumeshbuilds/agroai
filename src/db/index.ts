@@ -1,6 +1,6 @@
-import { neon, neonConfig } from "@neondatabase/serverless";
-import { DrizzleQueryError } from "drizzle-orm";
-import { drizzle, type NeonHttpDatabase } from "drizzle-orm/neon-http";
+import { Pool } from "@neondatabase/serverless";
+import { DrizzleQueryError, sql } from "drizzle-orm";
+import { drizzle, type NeonDatabase } from "drizzle-orm/neon-serverless";
 
 import * as schema from "./schema";
 
@@ -17,9 +17,17 @@ export class DatabaseNotConfiguredError extends Error {
   }
 }
 
-export type Database = NeonHttpDatabase<typeof schema>;
+export type Database = NeonDatabase<typeof schema>;
 
-let cached: Database | null = null;
+interface DbGlobals {
+  pool: Pool | null;
+  db: Database | null;
+}
+
+// Next.js dev server re-evaluates modules on hot reload; keep the pool on
+// `globalThis` so we do not leak a WebSocket pool per reload.
+const globalForDb = globalThis as unknown as { __agroaiDb?: DbGlobals };
+const globals: DbGlobals = (globalForDb.__agroaiDb ??= { pool: null, db: null });
 
 export function isDatabaseConfigured(): boolean {
   return Boolean(process.env.DATABASE_URL);
@@ -31,135 +39,93 @@ export function getDb(): Database {
     throw new DatabaseNotConfiguredError();
   }
 
-  if (!cached) {
-    installRetryingFetch();
-    cached = drizzle(neon(connectionString), { schema });
+  if (!globals.db) {
+    globals.pool = new Pool({ connectionString });
+    globals.db = drizzle(globals.pool, { schema });
   }
 
-  return cached;
+  return globals.db;
 }
 
 // ---------------------------------------------------------------------------
-// Transient connection retries
+// Row-level security scope
 // ---------------------------------------------------------------------------
 //
-// The Neon HTTP driver sends every query over `fetch`. A long-lived Next.js
-// process can pick up a keep-alive socket that the proxy has already closed, or
-// lose the connection while the compute wakes up. Those requests fail with an
-// opaque "Failed query: ..." wrapper even though the query itself is valid and
-// an immediate retry succeeds.
-//
-// Only read-only statements are retried: replaying an INSERT/UPDATE after a
-// dropped response could duplicate a write.
+// Every tenant table enforces Postgres RLS against the `app.farmer_id` session
+// setting. Because the app uses a connection pool, that setting must live
+// inside a transaction: `withScope` opens one, sets the GUCs with `set_config`,
+// runs the caller's queries, and commits/rolls back atomically. Without a
+// scope, policies deny access by default.
 
-const READ_ATTEMPTS = 3;
-const RETRY_DELAYS_MS = [150, 400];
-
-const RETRYABLE_NETWORK_CODES = new Set([
-  "ECONNRESET",
-  "ECONNREFUSED",
-  "ENOTFOUND",
-  "EAI_AGAIN",
-  "ETIMEDOUT",
-  "UND_ERR_SOCKET",
-  "UND_ERR_CLOSED",
-  "UND_ERR_CONNECT_TIMEOUT",
-  "UND_ERR_HEADERS_TIMEOUT",
-  "UND_ERR_BODY_TIMEOUT",
-]);
-
-const TRANSIENT_MESSAGE =
-  /fetch failed|socket hang up|other side closed|network connection|connection terminated/i;
-
-/** SQL that must never be replayed automatically. */
-const MUTATING_SQL =
-  /\b(insert|update|delete|merge|truncate|alter|create|drop|grant|revoke|comment on|copy)\b/;
-
-interface NeonQueryPayload {
-  query?: unknown;
-  queries?: { query?: unknown }[];
+export interface DbScope {
+  /** The signed-in farmer; rows owned by anyone else are hidden. */
+  farmerId?: number | null;
+  /**
+   * Farm ids this browser is allowed to read/claim while they are still
+   * unowned (drawn during onboarding before an account exists).
+   */
+  claimFarmIds?: number[];
+  /** Trusted server tasks (cron) that must span every farmer. */
+  service?: boolean;
 }
 
-const fetchImpl = globalThis.fetch.bind(globalThis);
-
-let retryFetchInstalled = false;
-
-function installRetryingFetch(): void {
-  if (retryFetchInstalled) return;
-  retryFetchInstalled = true;
-
-  neonConfig.fetchFunction = async (
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => {
-    const attempts = isReadOnlyRequest(init) ? READ_ATTEMPTS : 1;
-
-    for (let attempt = 1; ; attempt += 1) {
-      try {
-        return await fetchImpl(input, init);
-      } catch (error) {
-        if (attempt >= attempts || !isTransientFetchError(error)) throw error;
-        await sleep(RETRY_DELAYS_MS[attempt - 1] ?? 400);
-      }
-    }
-  };
+function claimIdsLiteral(ids: number[] | undefined): string {
+  return ids && ids.length > 0 ? ids.join(",") : "";
 }
 
-function isReadOnlyRequest(init?: RequestInit): boolean {
-  // The driver always sends a JSON string body; anything else is not ours.
-  if (typeof init?.body !== "string") return false;
-
-  let payload: NeonQueryPayload;
-  try {
-    payload = JSON.parse(init.body) as NeonQueryPayload;
-  } catch {
-    return false;
+/** Sets/overwrites the RLS scope on an already-open scoped database. */
+export async function setScope(db: Database, scope: DbScope): Promise<void> {
+  if (scope.farmerId !== undefined) {
+    await db.execute(
+      sql`select set_config('app.farmer_id', ${scope.farmerId === null ? "" : String(scope.farmerId)}, true)`,
+    );
   }
-
-  const statements = Array.isArray(payload.queries)
-    ? payload.queries
-    : [payload];
-  return (
-    statements.length > 0 &&
-    statements.every((statement) => isReadOnlyStatement(statement?.query))
-  );
-}
-
-function isReadOnlyStatement(query: unknown): boolean {
-  if (typeof query !== "string") return false;
-
-  const sql = query.trimStart().toLowerCase();
-  const reads =
-    sql.startsWith("select") ||
-    sql.startsWith("with") ||
-    sql.startsWith("show") ||
-    sql.startsWith("explain") ||
-    sql.startsWith("values");
-
-  // A `with` CTE can still contain a write, so check the whole statement.
-  return reads && !MUTATING_SQL.test(sql);
-}
-
-function isTransientFetchError(error: unknown): boolean {
-  let current: unknown = error;
-
-  for (let depth = 0; current && depth < 5; depth += 1) {
-    if (!(current instanceof Error)) return false;
-
-    const code = (current as Error & { code?: unknown }).code;
-    if (typeof code === "string" && RETRYABLE_NETWORK_CODES.has(code)) {
-      return true;
-    }
-    if (TRANSIENT_MESSAGE.test(current.message)) return true;
-
-    current = current.cause;
+  if (scope.claimFarmIds !== undefined) {
+    await db.execute(
+      sql`select set_config('app.claim_ids', ${claimIdsLiteral(scope.claimFarmIds)}, true)`,
+    );
   }
-
-  return false;
+  if (scope.service !== undefined) {
+    await db.execute(
+      sql`select set_config('app.service', ${scope.service ? "on" : ""}, true)`,
+    );
+  }
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+/**
+ * Runs `fn` inside a transaction with the RLS scope applied. All queries issued
+ * through the provided `db` see only rows the scope permits.
+ */
+export async function withScope<T>(
+  scope: DbScope,
+  fn: (db: Database) => Promise<T>,
+): Promise<T> {
+  const db = getDb();
+  return db.transaction(async (tx) => {
+    const scoped = tx as unknown as Database;
+    await setScope(scoped, { farmerId: null, claimFarmIds: [], service: false, ...scope });
+    return fn(scoped);
+  });
+}
+
+export function withFarmer<T>(
+  farmerId: number,
+  fn: (db: Database) => Promise<T>,
+): Promise<T> {
+  return withScope({ farmerId }, fn);
+}
+
+/** Anonymous onboarding: only this browser's unowned drafts are readable. */
+export function withClaim<T>(
+  claimFarmIds: number[],
+  fn: (db: Database) => Promise<T>,
+): Promise<T> {
+  return withScope({ claimFarmIds }, fn);
+}
+
+/** Trusted server task that spans every farmer (weekly cron). */
+export function withService<T>(fn: (db: Database) => Promise<T>): Promise<T> {
+  return withScope({ service: true }, fn);
 }
 
 // ---------------------------------------------------------------------------

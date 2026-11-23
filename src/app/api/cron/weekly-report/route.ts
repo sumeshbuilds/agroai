@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer, withService, type Database } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { assessAgroWeather } from "@/lib/agro-advisory";
 import { generateWeeklyReport, summariseWeather } from "@/lib/gemini";
@@ -115,38 +115,28 @@ async function readCropId(request: NextRequest): Promise<number | undefined> {
 }
 
 async function generateReports(cropId?: number, farmerId?: number) {
-  const db = getDb();
+  // Signed-in farmers run inside their own RLS scope; the scheduler (CRON_SECRET)
+  // runs with the trusted service scope so it can cover every farmer.
+  const runScoped = <T>(fn: (db: Database) => Promise<T>): Promise<T> =>
+    farmerId !== undefined ? withFarmer(farmerId, fn) : withService(fn);
 
-  const targets: Array<{ cropId: number; cropName: string; growthStage: string; ageDays: number; sowingDate: string; durationDays: number | null; farm: Farmland }> = [];
+  type Target = { cropId: number; cropName: string; growthStage: string; ageDays: number; sowingDate: string; durationDays: number | null; farm: Farmland };
 
-  if (cropId !== undefined) {
-    const row = await getCropWithFarm(db, cropId, farmerId);
-    if (!row) {
-      return { generated: [], message: `Crop ${cropId} was not found.` };
-    }
-    if (!row.farm) {
-      return {
-        generated: [],
-        message:
-          "This crop is not linked to a farm. Draw a farm boundary first so we can fetch local weather.",
-      };
-    }
-    const dto = toCropDTO({ ...row.crop, farmlandName: row.farm.name });
-    targets.push({
-      cropId: row.crop.id,
-      cropName: row.crop.cropName,
-      growthStage: row.crop.growthStage ?? "Seedling",
-      ageDays: dto.ageDays,
-      sowingDate: dto.sowingDate.slice(0, 10),
-      durationDays: row.crop.durationDays ?? null,
-      farm: row.farm,
-    });
-  } else {
-    const rows = await listActiveCropsWithFarm(db, farmerId);
-    for (const row of rows) {
-      if (!row.farm) continue;
+  const scan = await runScoped(async (db) => {
+    const rows: Target[] = [];
+
+    if (cropId !== undefined) {
+      const row = await getCropWithFarm(db, cropId, farmerId);
+      if (!row) return { rows: null, message: `Crop ${cropId} was not found.` } as const;
+      if (!row.farm) {
+        return {
+          rows: null,
+          message:
+            "This crop is not linked to a farm. Draw a farm boundary first so we can fetch local weather.",
+        } as const;
+      }
       const dto = toCropDTO({ ...row.crop, farmlandName: row.farm.name });
-      targets.push({
+      rows.push({
         cropId: row.crop.id,
         cropName: row.crop.cropName,
         growthStage: row.crop.growthStage ?? "Seedling",
@@ -155,10 +145,32 @@ async function generateReports(cropId?: number, farmerId?: number) {
         durationDays: row.crop.durationDays ?? null,
         farm: row.farm,
       });
+    } else {
+      const active = await listActiveCropsWithFarm(db, farmerId);
+      for (const row of active) {
+        if (!row.farm) continue;
+        const dto = toCropDTO({ ...row.crop, farmlandName: row.farm.name });
+        rows.push({
+          cropId: row.crop.id,
+          cropName: row.crop.cropName,
+          growthStage: row.crop.growthStage ?? "Seedling",
+          ageDays: dto.ageDays,
+          sowingDate: dto.sowingDate.slice(0, 10),
+          durationDays: row.crop.durationDays ?? null,
+          farm: row.farm,
+        });
+      }
     }
-  }
 
-  if (targets.length === 0) {
+    return { rows, message: null } as const;
+  });
+
+  if (scan.rows === null) {
+    return { generated: [] as WeeklyReportDTO[], message: scan.message ?? "" };
+  }
+  const resolvedTargets = scan.rows;
+
+  if (resolvedTargets.length === 0) {
     return {
       generated: [] as WeeklyReportDTO[],
       message:
@@ -168,7 +180,7 @@ async function generateReports(cropId?: number, farmerId?: number) {
 
   const generated: WeeklyReportDTO[] = [];
 
-  for (const target of targets) {
+  for (const target of resolvedTargets) {
     const weather = await fetchWeather(
       target.farm.centroidLat,
       target.farm.centroidLng,
@@ -189,20 +201,22 @@ async function generateReports(cropId?: number, farmerId?: number) {
       soil: analyseSoil(toFarmDTO(target.farm).soil),
     });
 
-    const report = await createReport(
-      db,
-      {
-        cropId: target.cropId,
-        weatherSummary: summariseWeather(weather),
-        aiActionPlan: advisory.actionPlan,
-        aiActionPlanOr: advisory.actionPlanOr,
-        cropName: target.cropName,
-      },
-      {
-        source: advisory.source,
-        model: advisory.model,
-        note: advisory.note,
-      },
+    const report = await runScoped((db) =>
+      createReport(
+        db,
+        {
+          cropId: target.cropId,
+          weatherSummary: summariseWeather(weather),
+          aiActionPlan: advisory.actionPlan,
+          aiActionPlanOr: advisory.actionPlanOr,
+          cropName: target.cropName,
+        },
+        {
+          source: advisory.source,
+          model: advisory.model,
+          note: advisory.note,
+        },
+      ),
     );
 
     generated.push(report);

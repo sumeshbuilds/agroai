@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import {
   analysePlantImage,
@@ -99,8 +99,6 @@ export async function POST(request: Request) {
       );
     }
 
-    const db = getDb();
-
     const cropIdRaw = Number(form.get("cropId"));
     const cropId =
       Number.isInteger(cropIdRaw) && cropIdRaw > 0 ? cropIdRaw : null;
@@ -113,7 +111,9 @@ export async function POST(request: Request) {
     let cropRow: Awaited<ReturnType<typeof getCropWithFarm>> = null;
 
     if (cropId !== null) {
-      const owned = await getCropWithFarm(db, cropId, farmer.id);
+      const owned = await withFarmer(farmer.id, (db) =>
+        getCropWithFarm(db, cropId, farmer.id),
+      );
       if (!owned) {
         return fail("That crop was not found on your account.", 404, {
           code: "CROP_NOT_FOUND",
@@ -168,18 +168,20 @@ export async function POST(request: Request) {
       context,
     });
 
-    const scan = await createDiseaseScan(db, {
-      farmerId: farmer.id,
-      cropId,
-      cropName: cropName ?? result.analysis.cropName,
-      plantPart,
-      note,
-      imageMime: mimeType,
-      imageData: Buffer.from(bytes).toString("base64"),
-      analysis: result.analysis,
-      source: result.source,
-      model: result.model,
-    });
+    const scan = await withFarmer(farmer.id, (db) =>
+      createDiseaseScan(db, {
+        farmerId: farmer.id,
+        cropId,
+        cropName: cropName ?? result.analysis.cropName,
+        plantPart,
+        note,
+        imageMime: mimeType,
+        imageData: Buffer.from(bytes).toString("base64"),
+        analysis: result.analysis,
+        source: result.source,
+        model: result.model,
+      }),
+    );
 
     return ok({ scan }, { status: 201 });
   } catch (error) {

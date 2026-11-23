@@ -13,7 +13,13 @@
  * This module must stay free of server-only imports.
  */
 
-export type CameraSessionStatus = "waiting" | "live" | "ended";
+export type CameraSessionStatus =
+  | "waiting"
+  | "live"
+  | "ended"
+  | "armed"
+  | "offline"
+  | "live_peek";
 
 /**
  * `motion` / `vehicle` / `other` remain in the union so old rows keep rendering,
@@ -100,6 +106,15 @@ export interface CameraSessionDTO {
   frameHeight: number | null;
   frameUpdatedAt: string | null;
   lastSeenAt: string | null;
+  /** Phone heartbeat + battery (event-driven security camera). */
+  batteryLevel?: number | null;
+  lastHeartbeat?: string | null;
+  pairingExpiresAt?: string | null;
+  lastEventAt?: string | null;
+  livePeekUntil?: string | null;
+  /** Derived device badge: armed / offline / live_peek / ended. */
+  securityStatus?: "armed" | "offline" | "live_peek" | "ended" | "paused";
+  heartbeatAge?: string;
   startedAt: string | null;
   endedAt: string | null;
   createdAt: string | null;
@@ -142,6 +157,9 @@ export interface CameraAlertDTO {
   reviewStatus?: "pending" | "confirmed" | "unconfirmed";
   lat: number | null;
   lng: number | null;
+  /** Evidence snapshot for this intrusion event (owner-only route). */
+  imageUrl?: string | null;
+  capturedAt?: string | null;
   createdAt: string | null;
   acknowledgedAt: string | null;
 }
@@ -183,6 +201,38 @@ export interface CameraIngestResponse {
   newAlerts: CameraAlertDTO[];
   /** True when the frame was queued for Groq vision verification. */
   verificationQueued: boolean;
+}
+
+/** POST /api/camera/stream/:token/heartbeat */
+export interface CameraHeartbeatPayload {
+  status?: "armed" | "offline" | "live_peek";
+  batteryLevel?: number | null;
+  deviceLabel?: string | null;
+  lat?: number | null;
+  lng?: number | null;
+}
+
+export interface CameraHeartbeatResponse {
+  ok: boolean;
+  session: CameraSessionDTO;
+  /** A dashboard is asking this phone for a 60-second Live Peek. */
+  peek: { id: number; offer: string; expiresAt: string } | null;
+}
+
+/** One 60-second WebRTC Live Peek request. */
+export interface CameraPeekDTO {
+  id: number;
+  sessionId: number;
+  status: "requested" | "answered" | "ended";
+  answer: string | null;
+  expiresAt: string;
+  createdAt: string | null;
+}
+
+export interface CameraPeekStartResponse {
+  ok: boolean;
+  peek: CameraPeekDTO;
+  livePeekUntil: string;
 }
 
 export interface CameraStats {

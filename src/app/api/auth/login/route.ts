@@ -1,4 +1,4 @@
-import { getDb } from "@/db";
+import { getDb, withFarmer } from "@/db";
 import {
   isValidPin,
   normalizeName,
@@ -34,7 +34,9 @@ export async function POST(request: Request) {
     }
 
     await setSessionCookie(farmer.id);
-    const setup = await getFarmerSetup(db, farmer.id);
+    const setup = await withFarmer(farmer.id, (scoped) =>
+      getFarmerSetup(scoped, farmer.id),
+    );
 
     return ok({ farmer: toFarmerDTO(farmer, setup) });
   } catch (error) {

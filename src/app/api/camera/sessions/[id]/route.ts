@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import {
   deleteCameraSession,
@@ -32,7 +32,9 @@ export async function GET(_request: Request, context: RouteContext) {
     const id = await resolveId(context);
     if (id === null) return fail("Invalid camera id.", 400);
 
-    const detail = await getCameraSession(getDb(), id, farmer.id);
+    const detail = await withFarmer(farmer.id, (db) =>
+      getCameraSession(db, id, farmer.id),
+    );
     if (!detail) return fail("Camera not found.", 404);
 
     return ok(detail);
@@ -68,10 +70,12 @@ export async function PATCH(request: Request, context: RouteContext) {
       return fail("Provide a status or name to update.", 400);
     }
 
-    const session = await updateCameraSession(getDb(), id, farmer.id, {
-      status,
-      name,
-    });
+    const session = await withFarmer(farmer.id, (db) =>
+      updateCameraSession(db, id, farmer.id, {
+        status,
+        name,
+      }),
+    );
     if (!session) return fail("Camera not found.", 404);
 
     return ok({ session });
@@ -93,7 +97,9 @@ export async function DELETE(_request: Request, context: RouteContext) {
     const id = await resolveId(context);
     if (id === null) return fail("Invalid camera id.", 400);
 
-    const removed = await deleteCameraSession(getDb(), id, farmer.id);
+    const removed = await withFarmer(farmer.id, (db) =>
+      deleteCameraSession(db, id, farmer.id),
+    );
     if (!removed) return fail("Camera not found.", 404);
 
     return ok({ removed: true });

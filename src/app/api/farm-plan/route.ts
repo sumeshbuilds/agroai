@@ -1,6 +1,6 @@
 import { connection, type NextRequest } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { assessAgroWeather } from "@/lib/agro-advisory";
 import { fetchClimateSummary } from "@/lib/climate";
@@ -43,28 +43,43 @@ export async function GET(request: NextRequest) {
       return fail("A valid farmId is required.", 400);
     }
 
-    const db = getDb();
-    const farm = await getFarmland(db, farmId, farmer.id);
-    if (!farm) return fail("Farm not found on your account.", 404);
-
     const requestedCropId = Number(params.get("cropId"));
-    let crop: CropDTO | null = null;
 
-    if (Number.isInteger(requestedCropId) && requestedCropId > 0) {
-      const row = await getCropWithFarm(db, requestedCropId, farmer.id);
-      if (!row) return fail("Crop not found on your account.", 404);
-      if (row.crop.farmlandId !== farmId) {
-        return fail("That crop belongs to a different field.", 400);
+    // Read everything scoped, then release the transaction before the network
+    // calls to weather/climate so we never hold a pooled connection open.
+    const scoped = await withFarmer(farmer.id, async (db) => {
+      const farm = await getFarmland(db, farmId, farmer.id);
+      if (!farm) {
+        return { error: fail("Farm not found on your account.", 404) } as const;
       }
-      crop = toCropDTO({
-        ...row.crop,
-        farmlandName: row.farm?.name ?? null,
-      });
-    } else {
-      const crops = await listCrops(db, farmer.id);
-      const farmCrops = crops.filter((entry) => entry.farmlandId === farmId);
-      crop = farmCrops.find((entry) => entry.isActive) ?? farmCrops[0] ?? null;
-    }
+
+      let crop: CropDTO | null = null;
+
+      if (Number.isInteger(requestedCropId) && requestedCropId > 0) {
+        const row = await getCropWithFarm(db, requestedCropId, farmer.id);
+        if (!row) {
+          return { error: fail("Crop not found on your account.", 404) } as const;
+        }
+        if (row.crop.farmlandId !== farmId) {
+          return {
+            error: fail("That crop belongs to a different field.", 400),
+          } as const;
+        }
+        crop = toCropDTO({
+          ...row.crop,
+          farmlandName: row.farm?.name ?? null,
+        });
+      } else {
+        const crops = await listCrops(db, farmer.id);
+        const farmCrops = crops.filter((entry) => entry.farmlandId === farmId);
+        crop = farmCrops.find((entry) => entry.isActive) ?? farmCrops[0] ?? null;
+      }
+
+      return { farm, crop } as const;
+    });
+
+    if ("error" in scoped) return scoped.error;
+    const { farm, crop } = scoped;
 
     const [weatherResult, climateResult] = await Promise.all([
       fetchWeather(farm.centroidLat, farm.centroidLng).catch(

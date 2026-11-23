@@ -1,6 +1,6 @@
 import { connection } from "next/server";
 
-import { getDb } from "@/db";
+import { withFarmer } from "@/db";
 import { getSessionFarmer } from "@/lib/auth";
 import { defaultDurationDays, stageNameForDay } from "@/lib/crop-guide";
 import { fail, handleRouteError, ok, readJson } from "@/lib/http";
@@ -18,8 +18,7 @@ export async function GET() {
       return fail("Sign in to view your crops.", 401, { code: "AUTH_REQUIRED" });
     }
 
-    const db = getDb();
-    const crops = await listCrops(db, farmer.id);
+    const crops = await withFarmer(farmer.id, (db) => listCrops(db, farmer.id));
     return ok({ crops });
   } catch (error) {
     return handleRouteError(error);
@@ -62,14 +61,6 @@ export async function POST(request: Request) {
       return fail("Select one of your farms for this crop.", 400);
     }
 
-    const db = getDb();
-    const farm = await getFarmland(db, body.farmlandId, farmer.id);
-    if (!farm) {
-      return fail("That farm was not found on your account.", 404, {
-        code: "FARM_NOT_FOUND",
-      });
-    }
-
     const durationDays =
       typeof body.durationDays === "number" &&
       Number.isFinite(body.durationDays) &&
@@ -82,16 +73,25 @@ export async function POST(request: Request) {
       Math.floor((Date.now() - sowingDate.getTime()) / MS_PER_DAY),
     );
 
-    const crop = await createCrop(db, {
-      cropName,
-      sowingDate,
-      farmlandId: farm.id,
-      durationDays,
-      growthStage:
-        body.growthStage?.trim() || stageNameForDay(cropName, ageDays, durationDays),
-    });
+    return withFarmer(farmer.id, async (db) => {
+      const farm = await getFarmland(db, body.farmlandId as number, farmer.id);
+      if (!farm) {
+        return fail("That farm was not found on your account.", 404, {
+          code: "FARM_NOT_FOUND",
+        });
+      }
 
-    return ok({ crop }, { status: 201 });
+      const crop = await createCrop(db, {
+        cropName,
+        sowingDate,
+        farmlandId: farm.id,
+        durationDays,
+        growthStage:
+          body.growthStage?.trim() || stageNameForDay(cropName, ageDays, durationDays),
+      });
+
+      return ok({ crop }, { status: 201 });
+    });
   } catch (error) {
     return handleRouteError(error);
   }
